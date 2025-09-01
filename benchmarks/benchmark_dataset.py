@@ -295,7 +295,7 @@ class EBChatDataset(BenchmarkDataset):
             if len(samples) >= num_requests:
                 break
             json_data = entry
-            prompt = entry["messages"][-1].get("content", "")
+            prompt = entry["messages"][-1].get("content", "")[0]["text"]
             history_QA = entry.get("messages", [])
             new_output_len = int(entry.get("max_tokens", 12288))
 

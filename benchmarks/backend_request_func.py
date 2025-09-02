@@ -86,14 +86,7 @@ async def async_request_eb_openai_chat_completions(
             content.append(request_func_input.multi_modal_content)
         payload = {
             "model": "null",
-            "messages": [
-                {
-                    "role": "user",
-                    "content": [
-                        {"type": "text", "text": request_func_input.prompt},
-                    ],
-                }
-            ],
+            "messages": request_func_input.prompt,
             "top_p": 0.8,
             "temperature": 0.8,
             "stop": ["</s>", "<|im_end|>"],

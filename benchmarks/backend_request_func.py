@@ -96,7 +96,7 @@ async def async_request_eb_openai_chat_completions(
             ],
             "top_p": 0.8,
             "temperature": 0.8,
-            "stop": ["</s>", "<eos>", "<|endoftext|>", "<|im_end|>"],
+            "stop": ["</s>", "<|im_end|>"],
             "stream": True,
             "stream_options": {
                 "include_usage": True,

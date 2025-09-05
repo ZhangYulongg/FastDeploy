@@ -164,12 +164,7 @@ async def async_request_eb_openai_chat_completions(
 
                             most_recent_timestamp = timestamp
 
-                    # output.generated_text = generated_text
-                    if output.generated_text.strip() == "":
-                        output.success = False
-                        output.error = "No generated text found!"
-                    else:
-                        output.success = True
+                    output.success = True
                     output.latency = most_recent_timestamp - st
                 else:
                     error_text = await response.text()

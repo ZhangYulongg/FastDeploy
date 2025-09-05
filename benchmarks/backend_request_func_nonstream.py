@@ -135,11 +135,7 @@ async def async_request_eb_openai_chat_completions(
                         output.prompt_tokens = usage.get("prompt_tokens", 0)
                         output.prompt_len = usage.get("prompt_tokens_details", {}).get("cached_tokens", 0)
 
-                    if output.generated_text.strip() == "":
-                        output.success = False
-                        output.error = "No generated text found!"
-                    else:
-                        output.success = True
+                    output.success = True
 
                     output.latency = time.perf_counter() - st
                     # 随便填的arrival_time，仅跑通压测

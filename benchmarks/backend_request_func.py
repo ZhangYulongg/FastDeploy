@@ -89,7 +89,7 @@ async def async_request_eb_openai_chat_completions(
             "messages": request_func_input.prompt,
             "top_p": 0.8,
             "temperature": 0.8,
-            "stop": ["</s>", "<|im_end|>"],
+            "stop": ["</s>", "<eos>", "<|endoftext|>", "<|im_end|>"],
             "stream": True,
             "stream_options": {
                 "include_usage": True,
@@ -101,7 +101,19 @@ async def async_request_eb_openai_chat_completions(
                         "thinking_mode": "close",
                     },
                 },
-                "bad_words_token_ids": [101031, 101032, 101027, 101028, 101023, 101024],
+                "bad_words_token_ids": [
+                    101023,
+                    101024,
+                    101025,
+                    101026,
+                    101027,
+                    101028,
+                    101029,
+                    101030,
+                    101031,
+                    101032,
+                    101033,
+                ],
             },
         }
         # 超参由yaml传入

@@ -96,7 +96,7 @@ async def async_request_eb_openai_chat_completions(
                 "include_usage": True,
                 "continuous_usage_stats": True,
             },
-            "max_tokens": random.randint(6144, 10240),
+            "max_tokens": random.randint(6144, 9216),
             "metadata": {
                 "chat_template_kwargs": {
                     "options": {

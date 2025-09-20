@@ -96,11 +96,6 @@ async def async_request_eb_openai_chat_completions(
                 "continuous_usage_stats": True,
             },
             "metadata": {
-                "chat_template_kwargs": {
-                    "options": {
-                        "thinking_mode": "close",
-                    },
-                },
                 "bad_words_token_ids": [
                     101023,
                     101024,

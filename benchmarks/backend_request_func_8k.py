@@ -98,11 +98,6 @@ async def async_request_eb_openai_chat_completions(
             },
             "max_tokens": random.randint(6144, 9216),
             "metadata": {
-                "chat_template_kwargs": {
-                    "options": {
-                        "thinking_mode": "close",
-                    },
-                },
                 "bad_words_token_ids": [
                     101023,
                     101024,

@@ -69,6 +69,8 @@ class RequestFuncOutput:
     tpot: float = 0.0  # avg next-token latencies
     prompt_len: int = 0
     prompt_tokens: int = 0  # 推理侧返回输入token数
+    reasoning_tokens: int = 0  # 思考长度
+    res_ttft: int = 0  # 包含思考首token时延
     error: str = ""
 
 
@@ -130,6 +132,7 @@ async def async_request_eb_openai_chat_completions(
         output.no = request_func_input.no
 
         ttft = 0.0
+        res_ttft = 0.0
         st = time.perf_counter()
         most_recent_timestamp = st
         try:
@@ -162,6 +165,16 @@ async def async_request_eb_openai_chat_completions(
                                 else:
                                     output.itl.append(timestamp - most_recent_timestamp)
 
+                                # response首token
+                                if res_ttft == 0.0:
+                                    if content:
+                                        res_ttft = choices[0]["arrival_time"]
+                                        output.res_ttft = res_ttft
+                                        usage = data.get("usage", {})
+                                        output.reasoning_tokens = max(usage.get("completion_tokens", 0) - 3, 0)
+                                        # print("!!!!!!!!content:", content)
+                                        # print("!!!!!!!!reasoning_tokens:", output.reasoning_tokens)
+
                                 output.generated_text += content or ""
                                 output.reasoning_content += reason_content or ""
                                 output.arrival_time.append(choices[0].get("arrival_time", timestamp))
@@ -171,7 +184,13 @@ async def async_request_eb_openai_chat_completions(
 
                             most_recent_timestamp = timestamp
 
-                    output.success = True
+                    # output.generated_text = generated_text
+                    if output.generated_text == "":
+                        output.success = True
+                        output.reasoning_tokens = output.output_tokens
+                        # output.error = "No generated text found!"
+                    else:
+                        output.success = True
                     output.latency = most_recent_timestamp - st
                 else:
                     error_text = await response.text()

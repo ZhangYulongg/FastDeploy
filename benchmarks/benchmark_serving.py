@@ -1,3 +1,4 @@
+
 """
 # Copyright (c) 2025  PaddlePaddle Authors. All Rights Reserved.
 #
@@ -104,6 +105,14 @@ class BenchmarkMetrics:
     median_output_len: float
     std_output_len: float
     percentiles_output_len: list[tuple[float, float]]
+    mean_reasoning_len: float
+    median_reasoning_len: float
+    std_reasoning_len: float
+    percentiles_reasoning_len: list[tuple[float, float]]
+    mean_res_ttft_ms: float
+    median_res_ttft_ms: float
+    std_res_ttft_ms: float
+    percentiles_res_ttft_ms: list[tuple[float, float]]
 
 
 async def get_request(
@@ -160,6 +169,7 @@ def calculate_metrics(
     input_lens: list[int] = []
     infer_input_lens: list[int] = []  # 推理侧输入token数
     actual_output_lens: list[int] = []
+    reasoning_output_lens: list[int] = []
     total_input = 0
     completed = 0
     good_completed = 0
@@ -169,6 +179,7 @@ def calculate_metrics(
     all_tpots: list[float] = []
     ttfts: list[float] = []
     s_ttfts: list[float] = []
+    res_ttfts: list[float] = []
     e2els: list[float] = []
     s_e2els: list[float] = []
     s_decodes: list[float] = []
@@ -186,6 +197,7 @@ def calculate_metrics(
                 continue
 
             actual_output_lens.append(output_len)
+            reasoning_output_lens.append(outputs[i].reasoning_tokens)
             input_lens.append(outputs[i].prompt_len)
             infer_input_lens.append(outputs[i].prompt_tokens)
             total_input += outputs[i].prompt_tokens
@@ -204,6 +216,7 @@ def calculate_metrics(
             ttfts.append(outputs[i].ttft)
             # 推理侧TTFT
             s_ttfts.append(outputs[i].arrival_time[1])
+            res_ttfts.append(outputs[i].res_ttft)
             e2els.append(outputs[i].latency)
             # 推理侧整句时延
             s_e2els.append(outputs[i].arrival_time[-1])
@@ -296,6 +309,14 @@ def calculate_metrics(
         std_output_len=np.std(actual_output_lens or 0) * 1,
         median_output_len=np.median(actual_output_lens or 0) * 1,
         percentiles_output_len=[(p, np.percentile(actual_output_lens or 0, p)) for p in selected_percentiles],
+        mean_reasoning_len=np.mean(reasoning_output_lens or 0) * 1,
+        std_reasoning_len=np.std(reasoning_output_lens or 0) * 1,
+        median_reasoning_len=np.median(reasoning_output_lens or 0) * 1,
+        percentiles_reasoning_len=[(p, np.percentile(reasoning_output_lens or 0, p)) for p in selected_percentiles],
+        mean_res_ttft_ms=np.mean(res_ttfts or 0) * 1000,  # ttfts is empty if streaming is not supported by backend
+        std_res_ttft_ms=np.std(res_ttfts or 0) * 1000,
+        median_res_ttft_ms=np.median(res_ttfts or 0) * 1000,
+        percentiles_res_ttft_ms=[(p, np.percentile(res_ttfts or 0, p) * 1000) for p in selected_percentiles],
     )
 
     return metrics, actual_output_lens
@@ -353,19 +374,6 @@ async def benchmark(
         extra_body=extra_body,
     )
 
-    print("test_input:", test_input)
-
-    test_output = await request_func(request_func_input=test_input)
-
-    print("test_output:", test_output)
-
-    if not test_output.success:
-        raise ValueError(
-            f"Initial test run failed - Please make sure that 1. benchmark arguments are correctly specified and 2. the http_proxy and https_proxy are turned off. Error: {test_output.error}"
-        )
-    else:
-        print("Initial test run completed. Starting main benchmark run...")
-
     if lora_modules:
         # For each input request, choose a LoRA module at random.
         lora_modules = iter([random.choice(lora_modules) for _ in range(len(input_requests))])
@@ -412,7 +420,10 @@ async def benchmark(
 
     benchmark_start_time = time.perf_counter()
     tasks: list[asyncio.Task] = []
+    outputs: list[RequestFuncOutput] = []
     async for request in get_request(input_requests, request_rate, burstiness):
+        if len(outputs) >= (args.num_prompts - args.max_concurrency):  # 已经达到 98 个结果，不再创建新任务
+            break
         prompt, output_len, no = (
             request.prompt,
             request.expected_output_len,
@@ -441,7 +452,21 @@ async def benchmark(
             extra_body=extra_body,
         )
         tasks.append(asyncio.create_task(limited_request_func(request_func_input=request_func_input, pbar=pbar)))
-    outputs: list[RequestFuncOutput] = await asyncio.gather(*tasks)
+
+    # 边收集边判断数量
+    for task in asyncio.as_completed(tasks):
+        try:
+            result = await task
+            outputs.append(result)
+        except asyncio.CancelledError:
+            continue
+        if len(outputs) >= (args.num_prompts - args.max_concurrency):
+            for t in tasks:
+                if not t.done():
+                    t.cancel()
+            break
+
+    # outputs: list[RequestFuncOutput] = await asyncio.gather(*tasks)
 
     if profile:
         print("Stopping profiler...")
@@ -491,11 +516,13 @@ async def benchmark(
         "request_throughput": metrics.request_throughput,
         "request_goodput:": (metrics.request_goodput if goodput_config_dict else None),
         "output_throughput": metrics.output_throughput,
+        "reasoning_lens": [output.reasoning_tokens for output in outputs],
         "total_token_throughput": metrics.total_token_throughput,
         "input_lens": [output.prompt_len for output in outputs],
         "infer_input_lens": [output.prompt_tokens for output in outputs],
         "output_lens": actual_output_lens,
         "ttfts": [output.ttft for output in outputs],
+        "res_ttfts": [output.res_ttft for output in outputs],
         "itls": [output.itl for output in outputs],
         "input_texts": [input.prompt for input in input_requests],
         "generated_texts": [output.generated_text for output in outputs],
@@ -572,6 +599,7 @@ async def benchmark(
     process_one_length("s_decode", "Decode", "解码速度(tok/s)")
     process_one_metric("ttft", "TTFT", "Time to First Token")
     process_one_metric("s_ttft", "S_TTFT", "Infer Time to First Token")
+    process_one_metric("res_ttft", "Response TTFT", "包含思考首token耗时")
     process_one_metric("tpot", "TPOT", "Time per Output Token (excl. 1st token)")
     process_one_metric("itl", "ITL", "Inter-token Latency")
     process_one_metric("s_itl", "S_ITL", "Infer Inter-token Latency")
@@ -579,6 +607,7 @@ async def benchmark(
     process_one_metric("s_e2el", "S_E2EL", "Infer End-to-end Latency")
     process_one_length("input_len", "Cached Tokens", "Cached Tokens")
     process_one_length("s_input_len", "Input Length", "Infer Input Length")
+    process_one_length("reasoning_len", "Reasoning Lenth", "思考长度")
     process_one_length("output_len", "Output Length", "Output Length")
 
     print("=" * 50)
@@ -1145,7 +1174,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "--percentile-metrics",
         type=str,
-        default="ttft,tpot,itl",
+        default="ttft,tpot,itl,reasoning_len",
         help="Comma-separated list of selected metrics to report percentils. "
         "This argument specifies the metrics to report percentiles. "
         'Allowed metric names are "ttft", "tpot", "itl", "e2el". '

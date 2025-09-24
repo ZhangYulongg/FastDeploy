@@ -422,7 +422,7 @@ async def benchmark(
     tasks: list[asyncio.Task] = []
     outputs: list[RequestFuncOutput] = []
     async for request in get_request(input_requests, request_rate, burstiness):
-        if len(outputs) >= (args.num_prompts - args.max_concurrency):  # 已经达到 98 个结果，不再创建新任务
+        if len(outputs) >= (args.num_prompts - args.max_concurrency):
             break
         prompt, output_len, no = (
             request.prompt,

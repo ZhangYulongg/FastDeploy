@@ -58,6 +58,7 @@ class RequestFuncOutput:
     """Output for requesting LLMs via API"""
 
     no: int = 0
+    request_id: str = ""
     generated_text: str = ""
     reasoning_content: str = ""
     success: bool = False
@@ -202,6 +203,7 @@ async def async_request_eb_openai_chat_completions(
                     )
                     output.error = error_text or ""
                     output.success = False
+                output.request_id = data.get("id", "")
         except Exception:
             output.success = False
             exc_info = sys.exc_info()

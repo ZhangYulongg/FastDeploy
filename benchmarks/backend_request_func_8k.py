@@ -20,7 +20,6 @@
 import io
 import json
 import os
-import random
 import sys
 import time
 import traceback
@@ -59,6 +58,7 @@ class RequestFuncOutput:
     """Output for requesting LLMs via API"""
 
     no: int = 0
+    request_id: str = ""
     generated_text: str = ""
     reasoning_content: str = ""
     success: bool = False
@@ -139,6 +139,7 @@ async def async_request_eb_openai_chat_completions(
         most_recent_timestamp = st
         try:
             async with session.post(url=api_url, json=payload, headers=headers) as response:
+                data = {}
                 if response.status == 200:
                     async for chunk_bytes in response.content:
                         chunk_bytes = chunk_bytes.strip()
@@ -204,6 +205,7 @@ async def async_request_eb_openai_chat_completions(
                     )
                     output.error = error_text or ""
                     output.success = False
+                output.request_id = data.get("id", "")
         except Exception:
             output.success = False
             exc_info = sys.exc_info()

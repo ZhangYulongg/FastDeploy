@@ -211,7 +211,7 @@ async def async_request_eb_openai_chat_completions(
             output.error = "".join(traceback.format_exception(*exc_info))
 
         # 保存失败请求结果
-        if not output.success:
+        if not output.success or output.output_tokens == 0:
             with open("error_output.txt", "a") as f:
                 f.write(str(output) + "\n")
     if pbar:

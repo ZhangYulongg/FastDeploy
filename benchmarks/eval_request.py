@@ -3,21 +3,22 @@ import requests
 import time
 import json
 import re
-import paddle
 
 try:
     import fastdeploy
 except ImportError:
     fastdeploy = None
+    
+try:
+    import paddle
+except ImportError:
+    paddle = None
 
 
 def get_commits_from_fastdeploy():
     """
     解析 fastdeploy.utils.version() 输出中的 commit ID
     """
-    if not fastdeploy:
-        return None, None
-
     try:
         version_text = fastdeploy.utils.version()
         fd_commit_match = re.search(r"fastdeploy GIT COMMIT ID:\s*([0-9a-f]{7,40})", version_text)

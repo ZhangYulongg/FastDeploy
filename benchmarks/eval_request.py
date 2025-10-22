@@ -2,13 +2,14 @@ import argparse
 import requests
 import time
 import json
+import sys
 import re
 
 try:
     import fastdeploy
 except ImportError:
     fastdeploy = None
-    
+
 try:
     import paddle
 except ImportError:
@@ -102,6 +103,7 @@ def wait_for_task_completion(base_url: str, eval_id: int, check_interval: int = 
     keywords = ["成功", "失败", "终止"]
     start_time = time.time()
 
+    sys.stdout.flush()
     while True:
         result = query_task_detail(base_url, eval_id)
 
@@ -137,6 +139,7 @@ def wait_for_task_completion(base_url: str, eval_id: int, check_interval: int = 
         if elapsed > max_wait:
             print(f"⏰ 等待超时（{max_wait}秒），退出轮询。")
             break
+        sys.stdout.flush()
 
     return result
 

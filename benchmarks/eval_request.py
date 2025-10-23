@@ -144,10 +144,42 @@ def wait_for_task_completion(base_url: str, eval_id: int, check_interval: int = 
     return result
 
 
+def check_fd_health(fd_ip_port: str, timeout: int = 5, max_wait: int = 300, interval: int = 5):
+    """
+    探测 FastDeploy 服务健康状态（循环探活版）
+    - 每隔 interval 秒探活一次
+    - 最长等待 max_wait 秒（默认 5 分钟）
+    - 若在超时前收到 200 状态码，则认为服务健康
+    - 否则报错退出
+    """
+    health_url = f"http://{fd_ip_port}/health"
+    print(f"🔍 正在探测 FastDeploy 服务健康状态: {health_url}")
+    start_time = time.time()
+
+    while True:
+        try:
+            response = requests.get(health_url, timeout=timeout)
+            if response.status_code == 200:
+                print("✅ FastDeploy 服务健康，继续执行。")
+                return True
+            else:
+                print(f"⚠️ 探活失败，状态码: {response.status_code}，{interval} 秒后重试...")
+        except Exception as e:
+            print(f"⚠️ 无法连接到 FastDeploy 服务 ({health_url})，错误: {e}，{interval} 秒后重试...")
+
+        elapsed = time.time() - start_time
+        if elapsed > max_wait:
+            print(f"❌ 探活超时（已等待 {max_wait} 秒），FastDeploy 服务未启动或不可达。")
+            sys.exit(1)
+
+        time.sleep(interval)
+
+
 def main():
     parser = argparse.ArgumentParser(description="Send JSON POST request to /aibench/create")
 
     parser.add_argument("--url", required=True, help="目标URL")
+    parser.add_argument("--fd_ip_port", required=True, help="FD服务IP端口")
     parser.add_argument("--name", required=True, help="任务名称")
     parser.add_argument("--model_id", default="eb5_ce", help="模型ID")
     parser.add_argument("--paddle_commit", default="paddle_commit", help="Paddle commit ID")
@@ -155,6 +187,9 @@ def main():
     parser.add_argument("--mode", default="test", help="运行模式，默认：test")
 
     args = parser.parse_args()
+
+    # 服务探活
+    check_fd_health(args.fd_ip_port)
 
     # 读取 fastdeploy/paddle commit
     auto_fd_commit, auto_paddle_commit = get_commits_from_fastdeploy()

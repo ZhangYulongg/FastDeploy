@@ -100,7 +100,7 @@ def wait_for_task_completion(base_url: str, eval_id: int, check_interval: int = 
         check_interval (int): 轮询间隔秒数（默认5分钟=300秒）
         max_wait (int): 最大等待时间（秒，默认7小时=25200秒）
     """
-    keywords = ["成功", "失败", "终止"]
+    keywords = ["成功", "失败", "终止", "中断"]
     start_time = time.time()
 
     sys.stdout.flush()

@@ -138,7 +138,7 @@ def wait_for_task_completion(base_url: str, eval_id: int, check_interval: int = 
         elapsed = time.time() - start_time
         if elapsed > max_wait:
             print(f"⏰ 等待超时（{max_wait}秒），退出轮询。")
-            break
+            exit(8)
         sys.stdout.flush()
 
     return result

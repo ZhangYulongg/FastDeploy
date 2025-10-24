@@ -101,14 +101,14 @@ def post_to_fastdeploy_ce(url, parsed_data, meta_info=None):
     print("\n========== 🚀 上传数据预览 ==========")
     print(json.dumps(payload, indent=2, ensure_ascii=False))
 
-    # try:
-    #     resp = requests.post(url, json=payload, timeout=30)
-    #     if resp.status_code == 200:
-    #         print("✅ 数据入库成功！")
-    #     else:
-    #         print(f"❌ 入库失败: {resp.status_code}, {resp.text}")
-    # except Exception as e:
-    #     print(f"❌ 请求异常: {e}")
+    try:
+        resp = requests.post(url, json=payload, timeout=30)
+        if resp.status_code == 200:
+            print("✅ 数据入库成功！")
+        else:
+            print(f"❌ 入库失败: {resp.status_code}, {resp.text}")
+    except Exception as e:
+        print(f"❌ 请求异常: {e}")
 
 
 def main():

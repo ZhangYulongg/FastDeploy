@@ -127,7 +127,9 @@ async def async_request_eb_openai_chat_completions(
         st = time.perf_counter()
         most_recent_timestamp = st
         try:
-            async with session.post(url=api_url, json=payload, headers=headers) as response:
+            async with session.post(
+                url=api_url, json=payload, headers=headers, read_bufsize=10 * 1024 * 1024
+            ) as response:
                 data = {}
                 if response.status == 200:
                     async for chunk_bytes in response.content:

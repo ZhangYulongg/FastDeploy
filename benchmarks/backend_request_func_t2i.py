@@ -179,7 +179,14 @@ async def async_request_eb_openai_chat_completions(
                                 output.arrival_time.append(choices[0].get("arrival_time", timestamp))
                             elif usage := data.get("usage", {}):
                                 output.output_tokens = usage.get("completion_tokens", 0)
-                                output.prompt_tokens = usage.get("prompt_tokens", 0)
+                                if usage.get("completion_tokens_details", {}).get("image_tokens", 0):
+                                    output.prompt_tokens = (
+                                        usage.get("prompt_tokens", 0)
+                                        - usage["completion_tokens_details"]["image_tokens"]
+                                    )
+                                else:
+                                    output.prompt_tokens = usage.get("prompt_tokens", 0)
+                                    output.success = False
 
                             most_recent_timestamp = timestamp
 

@@ -1,7 +1,9 @@
 import os
+import shutil
 import signal
 import socket
 import subprocess
+import sys
 import time
 
 import requests
@@ -144,3 +146,80 @@ def get_registered_number(router_url) -> dict:
         return registered_numbers
     except Exception:
         return {"mixed": 0, "prefill": 0, "decode": 0}
+
+
+class FDServer:
+    def __init__(
+        self,
+        model_path: str,
+        fd_serve_args: list[str],
+        env_dict: dict = None,
+        max_wait_seconds: int = 300,
+    ) -> None:
+        print("Pre-test port cleanup...")
+        clean_ports()
+        print("log dir clean ")
+        if os.path.exists("log") and os.path.isdir("log"):
+            shutil.rmtree("log")
+
+        self._start_server(model_path, fd_serve_args, env_dict)
+        self._wait_for_server(timeout=max_wait_seconds)
+
+    def _start_server(self, model_path: str, fd_serve_args: list[str], env_dict=None) -> None:
+        """start FD Server"""
+        log_path = "server.log"
+        env = os.environ.copy()
+        if env_dict is not None:
+            env.update(env_dict)
+        serve_cmd = [
+            sys.executable,
+            "-m",
+            "fastdeploy.entrypoints.openai.api_server",
+            "--model",
+            model_path,
+            "--port",
+            str(FD_API_PORT),
+            "--engine-worker-queue-port",
+            str(FD_ENGINE_QUEUE_PORT),
+            "--metrics-port",
+            str(FD_METRICS_PORT),
+            "--cache-queue-port",
+            str(FD_CACHE_QUEUE_PORT),
+            *fd_serve_args,
+        ]
+        print(f"Launching FDServer with: {' '.join(serve_cmd)}")
+        # Start subprocess in new process group
+        with open(log_path, "w") as logfile:
+            self.process = subprocess.Popen(
+                serve_cmd,
+                stdout=logfile,
+                stderr=subprocess.STDOUT,
+                start_new_session=True,  # Enables killing full group via os.killpg
+                env=env,
+            )
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc_value, traceback):
+        print("\n===== Post-test server cleanup... =====")
+        clean_ports()
+        try:
+            os.killpg(self.process.pid, signal.SIGTERM)
+            print(f"API server (pid={self.process.pid}) terminated")
+        except Exception as e:
+            print(f"Failed to terminate API server: {e}")
+
+    def _wait_for_server(self, timeout: int):
+        for _ in range(timeout):
+            if check_service_health(f"127.0.0.1:{FD_API_PORT}"):
+                print(f"API server is up on port {FD_API_PORT}")
+                break
+            time.sleep(1)
+        else:
+            print(f"[TIMEOUT] API server failed to start in {timeout} seconds. Cleaning up...")
+            try:
+                os.killpg(self.process.pid, signal.SIGTERM)
+            except Exception as e:
+                print(f"Failed to kill process group: {e}")
+            raise RuntimeError(f"API server did not start on port {FD_API_PORT}")

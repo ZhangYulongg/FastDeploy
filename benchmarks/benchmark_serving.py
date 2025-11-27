@@ -1,4 +1,3 @@
-
 """
 # Copyright (c) 2025  PaddlePaddle Authors. All Rights Reserved.
 #
@@ -343,6 +342,7 @@ async def benchmark(
     max_concurrency: Optional[int],
     lora_modules: Optional[Iterable[str]],
     extra_body: Optional[dict],
+    ip_list: Optional[list[str]] = None,
 ):
     """Benchmarks an API endpoint using a given set of sample inputs and returns"""
     if backend in ASYNC_REQUEST_FUNCS:
@@ -356,23 +356,23 @@ async def benchmark(
         input_requests[0].expected_output_len,
         input_requests[0].no,
     )
-    test_history_QA = input_requests[0].history_QA
+    # test_history_QA = input_requests[0].history_QA
 
-    test_input = RequestFuncInput(
-        model=model_id,
-        model_name=model_name,
-        prompt=test_prompt,
-        no=test_no,
-        prompt_len=0,
-        history_QA=test_history_QA,
-        hyper_parameters=hyper_parameters,
-        api_url=api_url,
-        output_len=test_output_len,
-        logprobs=logprobs,
-        ignore_eos=ignore_eos,
-        debug=debug,
-        extra_body=extra_body,
-    )
+    # test_input = RequestFuncInput(
+    #     model=model_id,
+    #     model_name=model_name,
+    #     prompt=test_prompt,
+    #     no=test_no,
+    #     prompt_len=0,
+    #     history_QA=test_history_QA,
+    #     hyper_parameters=hyper_parameters,
+    #     api_url=api_url,
+    #     output_len=test_output_len,
+    #     logprobs=logprobs,
+    #     ignore_eos=ignore_eos,
+    #     debug=debug,
+    #     extra_body=extra_body,
+    # )
 
     if lora_modules:
         # For each input request, choose a LoRA module at random.
@@ -410,64 +410,123 @@ async def benchmark(
     # and it will simplify the code in limited_request_func.
     #    semaphore = (asyncio.Semaphore(max_concurrency)
     #                 if max_concurrency else contextlib.nullcontext())
-    semaphore = asyncio.Semaphore(max_concurrency) if max_concurrency else None
+    ip_list = ip_list or []
 
-    async def limited_request_func(request_func_input, pbar):
-        if semaphore is None:
-            return await request_func(request_func_input=request_func_input, pbar=pbar)
-        async with semaphore:
-            return await request_func(request_func_input=request_func_input, pbar=pbar)
+    if len(ip_list) <= 1:
+        if len(ip_list) == 1:
+            api_url = f"http://{ip_list[0]}{args.endpoint}"
+        semaphore = asyncio.Semaphore(max_concurrency) if max_concurrency else None
 
-    benchmark_start_time = time.perf_counter()
-    tasks: list[asyncio.Task] = []
-    # outputs: list[RequestFuncOutput] = []
-    async for request in get_request(input_requests, request_rate, burstiness):
-        # if len(outputs) >= (args.num_prompts - args.max_concurrency):  # 已经达到 98 个结果，不再创建新任务
-        #     break
-        prompt, output_len, no = (
-            request.prompt,
-            request.expected_output_len,
-            request.no,
-        )
-        history_QA = request.history_QA
+        async def limited_request_func(request_func_input, pbar):
+            if semaphore is None:
+                return await request_func(request_func_input=request_func_input, pbar=pbar)
+            async with semaphore:
+                return await request_func(request_func_input=request_func_input, pbar=pbar)
 
-        req_model_id, req_model_name = model_id, model_name
-        if lora_modules:
-            req_lora_module = next(lora_modules)
-            req_model_id, req_model_name = req_lora_module, req_lora_module
+        tasks: list[asyncio.Task] = []
+        benchmark_start_time = time.perf_counter()
 
-        request_func_input = RequestFuncInput(
-            model=req_model_id,
-            model_name=req_model_name,
-            prompt=prompt,
-            no=no,
-            prompt_len=0,
-            history_QA=history_QA,
-            hyper_parameters=hyper_parameters,
-            api_url=api_url,
-            output_len=output_len,
-            logprobs=logprobs,
-            debug=debug,
-            ignore_eos=ignore_eos,
-            extra_body=extra_body,
-        )
-        tasks.append(asyncio.create_task(limited_request_func(request_func_input=request_func_input, pbar=pbar)))
+        async for request in get_request(input_requests, request_rate, burstiness):
+            # if len(outputs) >= (args.num_prompts - args.max_concurrency):  # 已经达到 98 个结果，不再创建新任务
+            #     break
+            prompt, output_len, no = (
+                request.prompt,
+                request.expected_output_len,
+                request.no,
+            )
+            history_QA = request.history_QA
 
-    # 边收集边判断数量
-    # for task in asyncio.as_completed(tasks):
-    #     try:
-    #         result = await task
-    #         outputs.append(result)
-    #     except asyncio.CancelledError:
-    #         continue
-    #     if len(outputs) >= (args.num_prompts - args.max_concurrency):
-    #         for t in tasks:
-    #             if not t.done():
-    #                 t.cancel()
-    #         break
+            req_model_id, req_model_name = model_id, model_name
+            if lora_modules:
+                req_lora_module = next(lora_modules)
+                req_model_id, req_model_name = req_lora_module, req_lora_module
 
-    outputs: list[RequestFuncOutput] = await asyncio.gather(*tasks)
-    # outputs = await asyncio.gather(*tasks)
+            request_func_input = RequestFuncInput(
+                model=req_model_id,
+                model_name=req_model_name,
+                prompt=prompt,
+                no=no,
+                prompt_len=0,
+                history_QA=history_QA,
+                hyper_parameters=hyper_parameters,
+                api_url=api_url,
+                output_len=output_len,
+                logprobs=logprobs,
+                debug=debug,
+                ignore_eos=ignore_eos,
+                extra_body=extra_body,
+            )
+            tasks.append(asyncio.create_task(limited_request_func(request_func_input=request_func_input, pbar=pbar)))
+
+        outputs: list[RequestFuncOutput] = await asyncio.gather(*tasks)
+    else:
+        # 多ip按DP均分并发
+        assert max_concurrency, "multi-IP 模式必须指定 max_concurrency"
+        n_ip = len(ip_list)
+        concurrency_per_ip = max_concurrency // n_ip
+        concurrency_remainder = max_concurrency % n_ip
+
+        # 分配请求
+        req_per_ip = len(input_requests) // n_ip
+        remainder = len(input_requests) % n_ip
+
+        ip_requests_map = {}
+        start = 0
+        for i, ip in enumerate(ip_list):
+            count = req_per_ip + (1 if i < remainder else 0)
+            ip_requests_map[ip] = input_requests[start : start + count]
+            start += count
+
+        semaphores = {
+            ip: asyncio.Semaphore(concurrency_per_ip + (1 if i < concurrency_remainder else 0))
+            for i, ip in enumerate(ip_list)
+        }
+
+        async def limited_request_func_per_ip(req_input, semaphore, pbar):
+            async with semaphore:
+                return await request_func(request_func_input=req_input, pbar=pbar)
+
+        tasks = []
+        for i, ip in enumerate(ip_list):
+            print(
+                f"Starting benchmark for IP: {ip}, "
+                f"concurrency per IP: {semaphores[ip]._value}, "
+                f"requests per IP: {len(ip_requests_map[ip])}",
+                flush=True,
+            )
+        benchmark_start_time = time.perf_counter()
+
+        for i, ip in enumerate(ip_list):
+            semaphore = semaphores[ip]
+
+            for request in ip_requests_map[ip]:
+                prompt, output_len, no = request.prompt, request.expected_output_len, request.no
+                history_QA = request.history_QA
+
+                req_model_id, req_model_name = model_id, model_name
+                if lora_modules:
+                    req_lora_module = next(lora_modules)
+                    req_model_id = req_model_name = req_lora_module
+
+                req_input = RequestFuncInput(
+                    model=req_model_id,
+                    model_name=req_model_name,
+                    prompt=prompt,
+                    no=no,
+                    prompt_len=0,
+                    history_QA=history_QA,
+                    hyper_parameters=hyper_parameters,
+                    api_url=f"http://{ip}{args.endpoint}",  # ★ 多 IP 模式仅替换 host:port
+                    output_len=output_len,
+                    logprobs=logprobs,
+                    debug=debug,
+                    ignore_eos=ignore_eos,
+                    extra_body=extra_body,
+                )
+
+                tasks.append(asyncio.create_task(limited_request_func_per_ip(req_input, semaphore, pbar)))
+
+        outputs: list[RequestFuncOutput] = await asyncio.gather(*tasks)
 
     if profile:
         print("Stopping profiler...")
@@ -900,6 +959,15 @@ def main(args: argparse.Namespace):
     else:
         hyper_parameters = {}
 
+    processed_list = []
+    for item in args.ip_list:
+        if "," in item:
+            processed_list.extend([x.strip() for x in item.split(",") if x.strip()])
+        else:
+            processed_list.append(item)
+
+    ip_list = processed_list
+
     benchmark_result = asyncio.run(
         benchmark(
             backend=backend,
@@ -922,6 +990,7 @@ def main(args: argparse.Namespace):
             max_concurrency=args.max_concurrency,
             lora_modules=args.lora_modules,
             extra_body=sampling_params,
+            ip_list=ip_list,
         )
     )
 
@@ -1012,6 +1081,17 @@ if __name__ == "__main__":
         type=str,
         default="/v1/completions",
         help="API endpoint.",
+    )
+    parser.add_argument(
+        "--ip-list",
+        nargs="*",
+        default=[],
+        help=(
+            "List of ip:port. "
+            "Supports: "
+            "1) --ip-list 127.0.0.1:8000 --ip-list 127.0.0.1:8001 "
+            "2) --ip-list 127.0.0.1:8000,127.0.0.1:8001"
+        ),
     )
     parser.add_argument(
         "--dataset-name",

@@ -51,6 +51,9 @@ class RequestFuncInput:
     ignore_eos: bool = False
     language: Optional[str] = None
     debug: bool = False
+    pd_metrics: bool = False
+    response_format: Optional[dict] = None
+    random_flag: bool = False
 
 
 @dataclass
@@ -63,6 +66,7 @@ class RequestFuncOutput:
     reasoning_content: str = ""
     success: bool = False
     latency: float = 0.0
+    end_timestamp: float = 0.0  # 模型完全返回的时间戳（秒, perf_counter基准）
     output_tokens: int = 0
     ttft: float = 0.0  # Time to first token
     arrival_time: list = field(default_factory=list)  # arrival_time
@@ -73,6 +77,73 @@ class RequestFuncOutput:
     reasoning_tokens: int = 0  # 思考长度
     res_ttft: int = 0  # 包含思考首token时延
     error: str = ""
+    metrics: dict = field(default_factory=dict)
+
+
+def safe_cost(a, b):
+    """时间差计算"""
+    if a is None or b is None:
+        return None
+    return a - b
+
+
+def metrics_summary(metrics, token_timestamps):
+    """Summarize metrics"""
+    if not metrics or len(token_timestamps) < 2:
+        return {}
+
+    m0 = metrics[0]
+    m_last = metrics[-1]
+
+    summary = {}
+
+    arrival_time = m0.get("arrival_time")
+    inference_start_time = m0.get("inference_start_time")
+
+    # prefill 总耗时
+    summary["prefill_cost_time"] = safe_cost(m0.get("send_request_output_to_decode_time"), arrival_time)
+    # prefill准备耗时
+    summary["prefill_prepare_cost_time"] = safe_cost(inference_start_time, arrival_time)
+    # 预处理耗时
+    summary["preprocess_cost_time"] = safe_cost(m0.get("scheduler_recv_req_time"), arrival_time)
+    # 请求缓存耗时
+    summary["cache_in_scheduler_cost_time"] = safe_cost(
+        m0.get("engine_get_req_time"), m0.get("scheduler_recv_req_time")
+    )
+    # 申请 decode资源耗时
+    summary["ask_decode_resource_cost_time"] = safe_cost(
+        m0.get("ask_decode_resource_finish_time"), m0.get("ask_decode_resource_start_time")
+    )
+    # prefill 的首 token 推理耗时
+    summary["prefill_first_token_infer_cost_time"] = safe_cost(
+        m0.get("engine_recv_first_token_time"), inference_start_time
+    )
+    # prefill 等待 cache 传输耗时
+    summary["wait_sending_cache_cost_time"] = safe_cost(
+        m0.get("send_request_output_to_decode_time"), m0.get("wait_for_sending_cache_time")
+    )
+    # decode分配资源耗时
+    summary["decode_preallocate_cost_time"] = safe_cost(
+        m_last.get("decode_preallocate_req_time"), m_last.get("decode_recv_req_time")
+    )
+    # decode准备推理耗时
+    summary["decode_prepare_cost_time"] = safe_cost(
+        m_last.get("decode_inference_start_time"), m_last.get("decode_recv_first_token_time")
+    )
+    # decode次token推理耗时
+    summary["decode_second_token_infer_cost_time"] = safe_cost(
+        m_last.get("decode_recv_second_token_time"), m_last.get("decode_inference_start_time")
+    )
+    # 返回首 token 链路耗时
+    summary["first_token_transmission_cost_time"] = safe_cost(
+        token_timestamps[0], m_last.get("decode_recv_first_token_time")
+    )
+    # 返回次 token 链路耗时
+    summary["second_token_transmission_cost_time"] = safe_cost(
+        token_timestamps[1], m_last.get("decode_recv_second_token_time")
+    )
+
+    return summary
 
 
 async def async_request_eb_openai_chat_completions(
@@ -89,33 +160,54 @@ async def async_request_eb_openai_chat_completions(
             content.append(request_func_input.multi_modal_content)
         payload = {
             "model": "null",
-            "messages": request_func_input.prompt,
-            "top_p": 0.8,
-            "temperature": 0.8,
+            "messages": request_func_input.history_QA,
+            "top_p": 1.0,
+            "temperature": 1.0,
             "stop": ["</s>", "<eos>", "<|endoftext|>", "<|im_end|>"],
             "stream": True,
+            # "logprobs": True,
+            # "top_logprobs": 0,
             "stream_options": {
                 "include_usage": True,
                 "continuous_usage_stats": True,
             },
-            "metadata": {
-                "bad_words_token_ids": [
-                    101023,
-                    101024,
-                    101025,
-                    101026,
-                    101027,
-                    101028,
-                    101029,
-                    101030,
-                    101031,
-                    101032,
-                    101033,
-                ],
+            # "max_tokens": request_func_input.output_len,
+            "collect_metrics": request_func_input.pd_metrics,
+            "chat_template_kwargs": {
+                "options": {
+                    "thinking_mode": "true",
+                    "tool_choice": {'mode': 'auto'},
+                },
             },
+            "return_token_ids": True,
+            "max_streaming_response_tokens": True,
+            "disable_chat_template": False,
+            "bad_words_token_ids": [
+                101023,
+                101024,
+                101025,
+                101026,
+                101027,
+                101028,
+                101029,
+                101030,
+                101031,
+                101032,
+                101033,
+            ],
         }
+        if request_func_input.response_format:
+            payload["response_format"] = request_func_input.response_format
+
         # 超参由yaml传入
         payload.update(request_func_input.hyper_parameters)
+
+        # 随机输入开关
+        if request_func_input.random_flag:
+            payload["max_tokens"] = request_func_input.output_len
+            metadata = payload.get("metadata", {})
+            metadata["min_tokens"] = request_func_input.output_len
+            payload["metadata"] = metadata
 
         if request_func_input.ignore_eos:
             payload["ignore_eos"] = request_func_input.ignore_eos
@@ -131,12 +223,14 @@ async def async_request_eb_openai_chat_completions(
         output = RequestFuncOutput()
         output.prompt_len = 0
         output.no = request_func_input.no
+        metrics_list = []
         request_id = "None"
 
         ttft = 0.0
         res_ttft = 0.0
         st = time.perf_counter()
         most_recent_timestamp = st
+        token_timestamps = []
         try:
             async with session.post(url=api_url, json=payload, headers=headers) as response:
                 data = {}
@@ -151,6 +245,10 @@ async def async_request_eb_openai_chat_completions(
                             # print("####chunk:", chunk, type(chunk))
                             timestamp = time.perf_counter()
                             data = json.loads(chunk)
+                            # print("####data:", json.dumps(data, indent=2, ensure_ascii=False))
+
+                            if "metrics" in data:
+                                metrics_list.append(data["metrics"])
 
                             if request_id == "None" and "id" in data:
                                 request_id = data["id"]
@@ -163,9 +261,12 @@ async def async_request_eb_openai_chat_completions(
                                     ttft = timestamp - st
                                     output.ttft = ttft
                                     # cached_tokens
-                                    output.prompt_len = (
-                                        data["usage"].get("prompt_tokens_details", {}).get("cached_tokens", 0)
-                                    )
+                                    if data["usage"] and data["usage"].get("prompt_tokens_details", {}):
+                                        output.prompt_len = (
+                                            data["usage"].get("prompt_tokens_details", {}).get("cached_tokens", 0)
+                                        )
+                                    else:
+                                        output.prompt_len = 0
 
                                 # Decoding phase
                                 else:
@@ -183,14 +284,22 @@ async def async_request_eb_openai_chat_completions(
 
                                 output.generated_text += content or ""
                                 output.reasoning_content += reason_content or ""
+                                # print(f"####content:{data}")
                                 output.arrival_time.append(choices[0].get("arrival_time", timestamp))
                             elif usage := data.get("usage", {}):
                                 output.output_tokens = usage.get("completion_tokens", 0)
                                 output.prompt_tokens = usage.get("prompt_tokens", 0)
 
                             most_recent_timestamp = timestamp
+                            token_timestamps.append(time.time())
 
                     # output.generated_text = generated_text
+                    # 在流式结束时，记录最后一个 chunk 收到的时间戳
+                    output.end_timestamp = most_recent_timestamp
+
+                    # 新增metrics统计，计算首token过滤空包
+                    output.metrics = metrics_summary(metrics_list, token_timestamps[1:])
+
                     if output.generated_text == "":
                         output.success = True
                         output.reasoning_tokens = output.output_tokens

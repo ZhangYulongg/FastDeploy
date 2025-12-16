@@ -43,8 +43,8 @@ def get_commits_from_files(fd_path="fd_commit.txt", paddle_commit_file="paddle_c
     return fd_commit, pd_commit
 
 
-def parse_benchmark_report(file_path: str):
-    with open(file_path, "r", encoding="utf-8") as f:
+def parse_benchmark_report(args):
+    with open(args.benchmark_file, "r", encoding="utf-8") as f:
         content = f.read()
 
     def extract(pattern, to_float=True):
@@ -53,6 +53,34 @@ def parse_benchmark_report(file_path: str):
             return None
         val = m.group(1).replace(",", "")
         return float(val) if to_float else val
+
+    max_gpu = 0
+    max_bs = 0
+    max_block = 0
+    with open(f"{args.log_dir}/default.gpu.log", "r") as f1:
+        for line1 in f1:
+            if ",202" in line1:
+                line_tmp = line1.strip().split(",")[3]
+                gpu = line_tmp.strip()
+                max_gpu = max(int(gpu), max_gpu)
+    print("gpu_memory:{}".format(max_gpu))
+    with open(f"{args.log_dir}/workerlog.0", "r") as f_worker:
+        for line in f_worker:
+            if "Model loading took" in line:
+                match = re.search(r'took\s+(\d+\.\d+)\s+seconds', line)
+                if match:
+                    time_value = match.group(1)
+                    print("loading_time:{}".format(round(float(time_value), 2)))
+    with open(f"{args.log_dir}/worker_process.log", "r") as f_process:
+        for line in f_process:
+            match = re.search(r'num_blocks_global:\s*(\d+)', line)
+            match_bs = re.search(r'num_running_requests:\s*(\d+)', line)
+            if match:
+                number = match.group(1)
+                max_block = max(int(number), max_block)
+            if match_bs:
+                bs = match_bs.group(1)
+                max_bs = max(int(bs), max_bs)
 
     data = {
         "receive_num": extract(r"Successful requests:\s+(\d+)", False),
@@ -63,10 +91,14 @@ def parse_benchmark_report(file_path: str):
         "infer_first_token_time": extract(r"Mean S_TTFT \(ms\):\s+([\d.]+)"),
         "end_to_end_latency": extract(r"Mean E2EL \(ms\):\s+([\d.]+)"),
         "infer_end_to_end_latency": extract(r"Mean S_E2EL \(ms\):\s+([\d.]+)"),
-        "inter_token_latency": extract(r"Mean ITL \(ms\):\s+([\d.]+)"),
+        "inter_token_latency": extract(r"Mean S_ITL \(ms\):\s+([\d.]+)"),
         "input_length": extract(r"Mean Input Length:\s+([\d.]+)"),
         "output_length": extract(r"Mean Output Length:\s+([\d.]+)"),
         # "reasoning_length": extract(r"Mean Reasoning Lenth:\s+([\d.]+)"),
+        "gpu": max_gpu,
+        "loading_time": time_value,
+        "block_num": max_block,
+        "real_bs": max_bs,
     }
 
     return data
@@ -91,6 +123,9 @@ def post_to_fastdeploy_ce(url, parsed_data, meta_info=None):
         "prefix_cache": "False",
         "stable_diff": "False",
         "base_diff": "False",
+        'defensive': {'cutoff': '0.0', 'cutoff_num': '0', 'json': '0.0', 'json_num': '0', 'single': '0.0',
+                      'single_num': '0', 'luanma': '0.0', 'luanma_num': '0', 'duolun': '0.0', 'duolun_num': '0',
+                      'biaodian': '0.0', 'biaodian_num': '0', 'en_zh': '0.0', 'en_zh_num': '0'}
     }
 
     if meta_info:
@@ -100,6 +135,7 @@ def post_to_fastdeploy_ce(url, parsed_data, meta_info=None):
 
     print("\n========== 🚀 上传数据预览 ==========")
     print(json.dumps(payload, indent=2, ensure_ascii=False))
+    print(json.dumps(payload, ensure_ascii=False))
 
     try:
         resp = requests.post(url, json=payload, timeout=30)
@@ -121,12 +157,15 @@ def main():
     parser.add_argument("--model", required=True, help="模型信息")
     parser.add_argument("--ipipe", required=True, help="ipipe链接")
     parser.add_argument("--branch", required=True, help="分支")
+    parser.add_argument("--deploy_type", default="集中式部署", help="部署方式")
+    parser.add_argument("--prefix_cache", default=False, help="是否开启prefix cache")
+    parser.add_argument("--log_dir", default="./log", help="FD日志目录")
 
     args = parser.parse_args()
 
     model_info = args.model.split("_")
 
-    parsed = parse_benchmark_report(args.benchmark_file)
+    parsed = parse_benchmark_report(args)
     post_to_fastdeploy_ce(args.url, parsed, meta_info={
         "model": model_info[0],
         "infer_length": model_info[1],
@@ -135,6 +174,8 @@ def main():
         "tp_num": model_info[4],
         "ipipe": args.ipipe,
         "branch": args.branch,
+        "deploy_type": args.deploy_type,
+        "prefix_cache": args.prefix_cache,
     })
 
 

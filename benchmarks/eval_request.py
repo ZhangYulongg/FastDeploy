@@ -185,6 +185,7 @@ def main():
     parser.add_argument("--paddle_commit", default="paddle_commit", help="Paddle commit ID")
     parser.add_argument("--fd_commit", default="fd_commit", help="FD commit ID")
     parser.add_argument("--mode", default="test", help="运行模式，默认：test")
+    parser.add_argument("--timeout", default="25200", help="超时时间，默认：25200，7小时")
 
     args = parser.parse_args()
 
@@ -210,7 +211,7 @@ def main():
     if result and "data" in result and "eval_id" in result["data"]:
         eval_id = result["data"]["eval_id"]
         print(f"🎯 创建成功，任务ID: {eval_id}")
-        wait_for_task_completion(args.url, eval_id)
+        wait_for_task_completion(args.url, eval_id, max_wait=int(args.timeout))
     else:
         print("⚠️ 未获取到 eval_id，无法进入轮询。")
 

@@ -301,7 +301,7 @@ async def async_request_eb_openai_chat_completions(
                     output.metrics = metrics_summary(metrics_list, token_timestamps[1:])
 
                     if output.generated_text == "":
-                        output.success = True
+                        output.success = False
                         output.reasoning_tokens = output.output_tokens
                         # output.error = "No generated text found!"
                     else:

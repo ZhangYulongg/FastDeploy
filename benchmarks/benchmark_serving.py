@@ -499,8 +499,12 @@ async def benchmark(
         start = 0
         for i, ip in enumerate(ip_list):
             count = req_per_ip + (1 if i < remainder else 0)
+            print(f"IP: {ip}, requests: {count}")
+            print(f"start: {start}, end: {start + count}")
             ip_requests_map[ip] = input_requests[start : start + count]
             start += count
+
+        # exit(8)
 
         semaphores = {
             ip: asyncio.Semaphore(concurrency_per_ip + (1 if i < concurrency_remainder else 0))
@@ -534,15 +538,15 @@ async def benchmark(
                     req_model_id = req_model_name = req_lora_module
 
                 req_input = RequestFuncInput(
-                    model=model_id,
-                    model_name=model_name,
-                    prompt=test_prompt,
-                    no=test_no,
+                    model=req_model_id,
+                    model_name=req_model_name,
+                    prompt=prompt,
+                    no=no,
                     prompt_len=0,
-                    history_QA=test_history_QA,
+                    history_QA=history_QA,
                     hyper_parameters=hyper_parameters,
                     api_url=f"http://{ip}{args.endpoint}",  # ★ 多 IP 模式仅替换 host:port
-                    output_len=test_output_len,
+                    output_len=output_len,
                     logprobs=logprobs,
                     ignore_eos=ignore_eos,
                     debug=debug,

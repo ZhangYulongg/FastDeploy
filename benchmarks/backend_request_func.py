@@ -300,7 +300,7 @@ async def async_request_eb_openai_chat_completions(
                     # 新增metrics统计，计算首token过滤空包
                     output.metrics = metrics_summary(metrics_list, token_timestamps[1:])
 
-                    if output.generated_text == "":
+                    if output.generated_text == "" and output.output_tokens < 32768:
                         output.success = False
                         output.reasoning_tokens = output.output_tokens
                         # output.error = "No generated text found!"
@@ -325,7 +325,7 @@ async def async_request_eb_openai_chat_completions(
         output.request_id = request_id
 
         # 保存失败请求结果
-        if not output.success or output.output_tokens == 0:
+        if not output.success or output.output_tokens == 0 or not output.generated_text:
             with open("error_output.txt", "a") as f:
                 f.write(str(output) + "\n")
     if pbar:

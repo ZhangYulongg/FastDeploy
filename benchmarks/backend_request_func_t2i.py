@@ -160,7 +160,7 @@ async def async_request_eb_openai_chat_completions(
             content.append(request_func_input.multi_modal_content)
         payload = {
             "model": "null",
-            "messages": request_func_input.prompt,
+            "messages": request_func_input.history_QA,
             "stream": True,
             "stream_options": {
                 "include_usage": True,

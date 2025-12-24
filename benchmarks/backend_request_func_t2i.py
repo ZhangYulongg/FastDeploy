@@ -232,7 +232,7 @@ async def async_request_eb_openai_chat_completions(
                                 request_id = data["id"]
 
                             if choices := data.get("choices"):
-                                content = choices[0]["delta"].get("content")
+                                content = choices[0]["delta"].get("multimodal_content")[0].get("text")
                                 reason_content = choices[0]["delta"].get("reasoning_content")
                                 # First token
                                 if ttft == 0.0:

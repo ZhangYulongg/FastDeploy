@@ -1,1 +1,2 @@
 max_tokens: 131072
+min_tokens: 16384

@@ -163,7 +163,6 @@ async def async_request_eb_openai_chat_completions(
             "messages": request_func_input.history_QA,
             "top_p": 1.0,
             "temperature": 1.0,
-            "stop": ["</s>", "<eos>", "<|endoftext|>", "<|im_end|>"],
             "stream": True,
             # "logprobs": True,
             # "top_logprobs": 0,

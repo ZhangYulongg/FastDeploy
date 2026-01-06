@@ -1,0 +1,4 @@
+max_tokens: 8193
+min_tokens: 8192
+top_p: 0
+temperature: 0

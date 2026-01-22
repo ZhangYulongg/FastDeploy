@@ -236,9 +236,9 @@ async def async_request_eb_openai_chat_completions(
         # 随机输入开关
         if request_func_input.random_flag:
             payload["max_tokens"] = request_func_input.output_len
-            metadata = payload.get("metadata", {})
-            metadata["min_tokens"] = request_func_input.output_len
-            payload["metadata"] = metadata
+            payload["min_tokens"] = request_func_input.output_len
+        if request_func_input.random_flag == "random_token_ids":
+            payload["prompt_token_ids"] = request_func_input.prompt
 
         if request_func_input.ignore_eos:
             payload["ignore_eos"] = request_func_input.ignore_eos

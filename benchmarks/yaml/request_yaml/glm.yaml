@@ -1,0 +1,13 @@
+max_tokens: 8193
+logprobs: true
+prompt_logprobs: null
+temp_scaled_logprobs: false
+top_p_normalized_logprobs: false
+frequency_penalty: 0.0
+top_logprobs: 0
+presence_penalty: 0.0
+temperature: 1.0
+top_p: 1.0
+include_stop_str_in_output: false
+repetition_penalty: 1.0
+disable_chat_template: true

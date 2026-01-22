@@ -191,41 +191,15 @@ async def async_request_eb_openai_chat_completions(
         if request_func_input.multi_modal_content:
             content.append(request_func_input.multi_modal_content)
         payload = {
-            "model": "null",
+            "model": request_func_input.model,
             "messages": request_func_input.history_QA,
-            "top_p": 1.0,
-            "temperature": 1.0,
             "stream": True,
-            # "logprobs": True,
-            # "top_logprobs": 0,
             "stream_options": {
                 "include_usage": True,
                 "continuous_usage_stats": True,
             },
-            # "max_tokens": request_func_input.output_len,
+            "max_tokens": request_func_input.output_len,
             "collect_metrics": request_func_input.pd_metrics,
-            "chat_template_kwargs": {
-                "options": {
-                    "thinking_mode": "true",
-                    "tool_choice": {'mode': 'auto'},
-                },
-            },
-            "return_token_ids": True,
-            "max_streaming_response_tokens": True,
-            "disable_chat_template": False,
-            "bad_words_token_ids": [
-                101023,
-                101024,
-                101025,
-                101026,
-                101027,
-                101028,
-                101029,
-                101030,
-                101031,
-                101032,
-                101033,
-            ],
         }
         if request_func_input.response_format:
             payload["response_format"] = request_func_input.response_format

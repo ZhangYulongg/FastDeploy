@@ -77,14 +77,16 @@ def parse_benchmark_report(args):
             if match:
                 number = match.group(1)
                 max_block = max(int(number), max_block)
-    with open(f"{args.log_dir}/fastdeploy_dprank0.log", "r") as f_dprank:
-        for line in f_dprank:
-            match = re.search(r'total_batch_number:\s*(\d+)', line)
-            match_bs = re.search(r'available_batch:\s*(\d+)', line)
-            if match:
-                total_batch_number = match.group(1)
-                available_batch = match_bs.group(1)
-                max_bs = max(int(total_batch_number) - int(available_batch), max_bs)
+    log_path = os.path.join(args.log_dir, "fastdeploy_dprank0.log")
+    if os.path.exists(log_path):
+        with open(f"{args.log_dir}/fastdeploy_dprank0.log", "r") as f_dprank:
+            for line in f_dprank:
+                match = re.search(r'total_batch_number:\s*(\d+)', line)
+                match_bs = re.search(r'available_batch:\s*(\d+)', line)
+                if match:
+                    total_batch_number = match.group(1)
+                    available_batch = match_bs.group(1)
+                    max_bs = max(int(total_batch_number) - int(available_batch), max_bs)
 
     data = {
         "receive_num": extract(r"Successful requests:\s+(\d+)", False),

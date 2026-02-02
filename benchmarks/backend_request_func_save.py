@@ -233,6 +233,10 @@ async def async_request_eb_openai_chat_completions(
         # 超参由yaml传入
         payload.update(request_func_input.hyper_parameters)
 
+        if request_func_input.prompt:
+            payload["prompt_token_ids"] = request_func_input.prompt
+            payload["messages"] = [{"role": "user", "content": [{"type": "text", "text": ""}]}]
+
         # 随机输入开关
         if request_func_input.random_flag:
             payload["max_tokens"] = request_func_input.output_len

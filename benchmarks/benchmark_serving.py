@@ -560,6 +560,10 @@ async def benchmark(
 
         outputs: list[RequestFuncOutput] = await asyncio.gather(*tasks)
 
+    # 多轮对话需要flatten后统计
+    if args.multi_turn:
+        outputs = [x for sub in outputs for x in sub]
+
     outputs.sort(key=lambda x: x.end_timestamp)
 
     if profile:
@@ -1019,6 +1023,9 @@ def main(args: argparse.Namespace):
     np.random.seed(args.seed)
 
     backend = args.backend
+    # 支持多轮对话方式请求，仅支持chat接口
+    if args.multi_turn:
+        backend = "openai-chat-multi-turn"
     model_id = args.model
     model_name = args.served_model_name
     tokenizer_id = args.tokenizer if args.tokenizer is not None else args.model
@@ -1329,6 +1336,11 @@ if __name__ == "__main__":
         "--pd-metrics",
         action="store_true",
         help="请求时增加PD分离参数，metrics: True",
+    )
+    parser.add_argument(
+        "--multi-turn",
+        action="store_true",
+        help="按多轮对话方式请求",
     )
     parser.add_argument(
         "--drop-ratio",

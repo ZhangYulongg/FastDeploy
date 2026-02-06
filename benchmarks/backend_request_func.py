@@ -150,7 +150,7 @@ def metrics_summary(metrics, token_timestamps):
 async def async_request_eb_openai_chat_completions(
     request_func_input: RequestFuncInput,
     pbar: Optional[tqdm] = None,
-    session: aiohttp.ClientSession | None = None,
+    session: aiohttp.ClientSession = None,
 ) -> RequestFuncOutput:
     """Request an LLM using EB OpenAI"""
     api_url = request_func_input.api_url

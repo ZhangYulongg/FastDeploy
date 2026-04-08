@@ -1,2 +1,2 @@
 max_tokens: 131072
-disable_chat_template: true
+model: "infer-a2b077c11f7c4477"

@@ -1,0 +1,48 @@
+stop:
+  - "</s>"
+  - "<eos>"
+  - "<|endoftext|>"
+  - "<|im_end|>"
+
+topp: 0.95
+top_p: 0.95
+
+extra:
+  timeout: 18000
+
+metadata:
+  model_generation: "EB50"
+
+eda_close: true
+safe_close: true
+vilg_close: true
+aorura_close: true
+memory_close: true
+prompt_close: true
+mm_aurora_close: true
+mrag_router_close: true
+ernie_router_close: true
+
+temperature: 0.6
+encode_version: "v1020"
+
+total_timeout_ms: 18000000
+max_message_delay_ms: 500000
+first_message_timeout_ms: 3600000
+
+bad_words_token_ids:
+  - 101023
+  - 101024
+  - 101025
+  - 101026
+  - 101027
+  - 101028
+  - 101029
+  - 101030
+  - 101031
+  - 101032
+  - 101033
+
+chat_template_kwargs:
+  options:
+    thinking_mode: true

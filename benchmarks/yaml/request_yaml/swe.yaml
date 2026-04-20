@@ -1,0 +1,7 @@
+return_token_ids: false
+topp: 0.95
+extra:
+  timeout: 10800
+top_p: 0.95
+max_tokens: 131072
+temperature: 1

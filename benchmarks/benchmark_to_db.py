@@ -5,12 +5,13 @@ upload_benchmark_result.py
 解析 benchmark_report.txt 并上传至 FastDeploy CE 接口
 """
 
-import re
-import json
 import argparse
+import json
 import os
-import requests
+import re
 from datetime import datetime
+
+import requests
 
 
 def get_commits_from_files(fd_path="fd_commit.txt", paddle_commit_file="paddle_commit.txt"):
@@ -43,6 +44,16 @@ def get_commits_from_files(fd_path="fd_commit.txt", paddle_commit_file="paddle_c
     return fd_commit, pd_commit
 
 
+def find_files(log_dir, target_name):
+    """递归查找所有匹配文件"""
+    result = []
+    for root, _, files in os.walk(log_dir):
+        for f in files:
+            if f == target_name:
+                result.append(os.path.join(root, f))
+    return result
+
+
 def parse_benchmark_report(args):
     with open(args.benchmark_file, "r", encoding="utf-8") as f:
         content = f.read()
@@ -57,36 +68,57 @@ def parse_benchmark_report(args):
     max_gpu = 0
     max_bs = 0
     max_block = 0
-    with open(f"{args.log_dir}/default.gpu.log", "r") as f1:
-        for line1 in f1:
-            if ",202" in line1:
-                line_tmp = line1.strip().split(",")[3]
-                gpu = line_tmp.strip()
-                max_gpu = max(int(gpu), max_gpu)
-    print("gpu_memory:{}".format(max_gpu))
-    with open(f"{args.log_dir}/workerlog.0", "r") as f_worker:
-        for line in f_worker:
-            if "Model loading took" in line:
-                match = re.search(r'took\s+(\d+\.\d+)\s+seconds', line)
+    loading_time = None
+
+    # ===== 1. GPU =====
+    gpu_logs = find_files(args.log_dir, "default.gpu.log")
+    for path in gpu_logs:
+        with open(path, "r", errors="ignore") as f:
+            for line in f:
+                if ",202" in line:
+                    parts = line.strip().split(",")
+                    if len(parts) > 3:
+                        try:
+                            gpu = int(parts[3].strip())
+                            max_gpu = max(gpu, max_gpu)
+                        except:
+                            pass
+
+    print(f"gpu_memory:{max_gpu}")
+
+    # ===== 2. loading time =====
+    worker_logs = find_files(args.log_dir, "workerlog.0")
+    for path in worker_logs:
+        with open(path, "r", errors="ignore") as f:
+            for line in f:
+                if "Model loading took" in line:
+                    match = re.search(r"took\s+(\d+\.\d+)\s+seconds", line)
+                    if match:
+                        loading_time = round(float(match.group(1)), 2)
+
+    if loading_time is not None:
+        print(f"loading_time:{loading_time}")
+
+    # ===== 3. block =====
+    process_logs = find_files(args.log_dir, "worker_process.log")
+    for path in process_logs:
+        with open(path, "r", errors="ignore") as f:
+            for line in f:
+                match = re.search(r"num_blocks_global:\s*(\d+)", line)
                 if match:
-                    time_value = match.group(1)
-                    print("loading_time:{}".format(round(float(time_value), 2)))
-    with open(f"{args.log_dir}/worker_process.log", "r") as f_process:
-        for line in f_process:
-            match = re.search(r'num_blocks_global:\s*(\d+)', line)
-            if match:
-                number = match.group(1)
-                max_block = max(int(number), max_block)
-    log_path = os.path.join(args.log_dir, "fastdeploy_dprank0.log")
-    if os.path.exists(log_path):
-        with open(f"{args.log_dir}/fastdeploy_dprank0.log", "r") as f_dprank:
-            for line in f_dprank:
-                match = re.search(r'total_batch_number:\s*(\d+)', line)
-                match_bs = re.search(r'available_batch:\s*(\d+)', line)
-                if match:
-                    total_batch_number = match.group(1)
-                    available_batch = match_bs.group(1)
-                    max_bs = max(int(total_batch_number) - int(available_batch), max_bs)
+                    max_block = max(int(match.group(1)), max_block)
+
+    # ===== 4. batch size =====
+    dp_logs = find_files(args.log_dir, "fastdeploy_dprank0.log")
+    for path in dp_logs:
+        with open(path, "r", errors="ignore") as f:
+            for line in f:
+                match = re.search(r"total_batch_number:\s*(\d+)", line)
+                match_bs = re.search(r"available_batch:\s*(\d+)", line)
+                if match and match_bs:
+                    total = int(match.group(1))
+                    available = int(match_bs.group(1))
+                    max_bs = max(total - available, max_bs)
 
     data = {
         "receive_num": extract(r"Successful requests:\s+(\d+)", False),
@@ -100,9 +132,8 @@ def parse_benchmark_report(args):
         "inter_token_latency": extract(r"Mean S_ITL \(ms\):\s+([\d.]+)"),
         "input_length": extract(r"Mean Input Length:\s+([\d.]+)"),
         "output_length": extract(r"Mean Output Length:\s+([\d.]+)"),
-        # "reasoning_length": extract(r"Mean Reasoning Lenth:\s+([\d.]+)"),
         "gpu": max_gpu,
-        "loading_time": time_value,
+        "loading_time": loading_time,
         "block_num": max_block,
         "real_bs": max_bs,
     }
@@ -129,9 +160,22 @@ def post_to_fastdeploy_ce(url, parsed_data, meta_info=None):
         "prefix_cache": "False",
         "stable_diff": "False",
         "base_diff": "False",
-        'defensive': {'cutoff': '0.0', 'cutoff_num': '0', 'json': '0.0', 'json_num': '0', 'single': '0.0',
-                      'single_num': '0', 'luanma': '0.0', 'luanma_num': '0', 'duolun': '0.0', 'duolun_num': '0',
-                      'biaodian': '0.0', 'biaodian_num': '0', 'en_zh': '0.0', 'en_zh_num': '0'}
+        "defensive": {
+            "cutoff": "0.0",
+            "cutoff_num": "0",
+            "json": "0.0",
+            "json_num": "0",
+            "single": "0.0",
+            "single_num": "0",
+            "luanma": "0.0",
+            "luanma_num": "0",
+            "duolun": "0.0",
+            "duolun_num": "0",
+            "biaodian": "0.0",
+            "biaodian_num": "0",
+            "en_zh": "0.0",
+            "en_zh_num": "0",
+        },
     }
 
     if meta_info:
@@ -172,17 +216,21 @@ def main():
     model_info = args.model.split("_")
 
     parsed = parse_benchmark_report(args)
-    post_to_fastdeploy_ce(args.url, parsed, meta_info={
-        "model": model_info[0],
-        "infer_length": model_info[1],
-        "infer_type": model_info[2],
-        "machine": model_info[3],
-        "tp_num": model_info[4],
-        "ipipe": args.ipipe,
-        "branch": args.branch,
-        "deploy_type": args.deploy_type,
-        "prefix_cache": args.prefix_cache,
-    })
+    post_to_fastdeploy_ce(
+        args.url,
+        parsed,
+        meta_info={
+            "model": model_info[0],
+            "infer_length": model_info[1],
+            "infer_type": model_info[2],
+            "machine": model_info[3],
+            "tp_num": model_info[4],
+            "ipipe": args.ipipe,
+            "branch": args.branch,
+            "deploy_type": args.deploy_type,
+            "prefix_cache": args.prefix_cache,
+        },
+    )
 
 
 if __name__ == "__main__":

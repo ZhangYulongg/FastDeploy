@@ -351,6 +351,20 @@ async def async_request_eb_openai_chat_completions(
                         # print("####chunk:", chunk, type(chunk))
                         timestamp = time.perf_counter()
                         data = json.loads(chunk)
+                        # 新增：捕获服务端流式 error
+                        if "error" in data:
+                            err = data["error"]
+
+                            output.success = False
+                            output.error = err.get("message", str(err))
+
+                            # 可选：保存更多信息
+                            output.error_type = err.get("type")
+                            output.error_code = err.get("code")
+
+                            print("####server error:", json.dumps(err, ensure_ascii=False))
+
+                            break
                         # print("####data:", json.dumps(data, indent=2, ensure_ascii=False))
 
                         if "metrics" in data:
@@ -433,8 +447,8 @@ async def async_request_eb_openai_chat_completions(
                 output.output_tokens = usage.get("completion_tokens", 0)
                 output.prompt_tokens = usage.get("prompt_tokens", 0)
                 if output.prompt_len == 0:
-                    if data["usage"] and data["usage"].get("prompt_tokens_details", {}):
-                        output.prompt_len = data["usage"].get("prompt_tokens_details", {}).get("cached_tokens", 0)
+                    prompt_details = usage.get("prompt_tokens_details") or {}
+                    output.prompt_len = prompt_details.get("cached_tokens", 0)
 
                 if tool_call_buffer:
                     for _, tc in tool_call_buffer.items():

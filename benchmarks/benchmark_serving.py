@@ -259,6 +259,7 @@ def calculate_metrics(
                         s_decodes.append(0)
                 else:
                     s_decodes.append(0)
+            completed += 1
         else:
             actual_output_lens.append(0)
             input_lens.append(0)

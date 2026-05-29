@@ -214,25 +214,51 @@ def calculate_metrics(
             # Note: if output_len <= 1, we regard tpot as 0 for goodput
             all_tpots.append(tpot)
             itls += outputs[i].itl
-            # 推理侧ITL
-            s_a = outputs[i].arrival_time[1:]
-            for j in range(len(s_a) - 2):
-                s_itls.append(s_a[j + 1] - s_a[j])
             ttfts.append(outputs[i].ttft)
-            # 推理侧TTFT
-            s_ttfts.append(outputs[i].arrival_time[1])
             res_ttfts.append(outputs[i].res_ttft)
             e2els.append(outputs[i].latency)
-            # 推理侧整句时延
-            s_e2els.append(outputs[i].arrival_time[-1])
-            # 解码速度去掉首token
-            if len(outputs[i].arrival_time) > 2:
-                s_decodes.append(
-                    (outputs[i].output_tokens - 1) / (outputs[i].arrival_time[-1] - outputs[i].arrival_time[1])
-                )
+
+            # arrival_time相关指标
+            if getattr(outputs[i], "has_arrival_time", False) and len(outputs[i].arrival_time) > 1:
+                # 推理侧ITL
+                s_a = outputs[i].arrival_time[1:]
+                for j in range(len(s_a) - 1):
+                    s_itls.append(s_a[j + 1] - s_a[j])
+
+                # 推理侧TTFT
+                s_ttfts.append(outputs[i].arrival_time[1])
+
+                # 推理侧整句时延
+                s_e2els.append(outputs[i].arrival_time[-1])
+
             else:
-                print("len(outputs[i].arrival_time) <= 2")
-            completed += 1
+                # sglang等不返回arrival_time
+                s_ttfts.append(0)
+                s_e2els.append(0)
+
+            # 解码速度（兼容无arrival_time场景）
+            if getattr(outputs[i], "has_arrival_time", False):
+                # FD有arrival_time场景
+                if len(outputs[i].arrival_time) > 2:
+                    decode_time = outputs[i].arrival_time[-1] - outputs[i].arrival_time[1]
+
+                    if decode_time > 0:
+                        s_decodes.append((outputs[i].output_tokens - 1) / decode_time)
+                    else:
+                        s_decodes.append(0)
+                else:
+                    s_decodes.append(0)
+            else:
+                # sglang等无arrival_time场景fallback
+                if outputs[i].output_tokens > 1:
+                    decode_time = outputs[i].latency - outputs[i].ttft
+
+                    if decode_time > 0:
+                        s_decodes.append((outputs[i].output_tokens - 1) / decode_time)
+                    else:
+                        s_decodes.append(0)
+                else:
+                    s_decodes.append(0)
         else:
             actual_output_lens.append(0)
             input_lens.append(0)

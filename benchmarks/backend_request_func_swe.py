@@ -71,6 +71,7 @@ class RequestFuncOutput:
     generated_text: str = ""
     reasoning_content: str = ""
     success: bool = False
+    has_arrival_time: bool = False
     latency: float = 0.0
     end_timestamp: float = 0.0  # 模型完全返回的时间戳（秒, perf_counter基准）
     output_tokens: int = 0
@@ -405,8 +406,7 @@ async def async_request_eb_openai_chat_completions(
                                 usage = data.get("usage") or {}
 
                                 if usage.get("prompt_tokens_details"):
-                                    output.prompt_len = usage.get("prompt_tokens_details", {}).get(
-                                        "cached_tokens", 0)
+                                    output.prompt_len = usage.get("prompt_tokens_details", {}).get("cached_tokens", 0)
                                 else:
                                     output.prompt_len = 0
 
@@ -417,7 +417,7 @@ async def async_request_eb_openai_chat_completions(
                             # response首token
                             if res_ttft == 0.0:
                                 if content:
-                                    res_ttft = choices[0].get("arrival_time", timestamp)
+                                    res_ttft = choices[0].get("arrival_time", timestamp - st)
                                     output.res_ttft = res_ttft
                                     usage = data.get("usage") or {}
                                     output.reasoning_tokens = max(usage.get("completion_tokens", 0) - 1, 0)
@@ -427,7 +427,10 @@ async def async_request_eb_openai_chat_completions(
                             if completion_token_ids:
                                 output.output_ids.extend(completion_token_ids)
                             # print(f"####content:{data}")
-                            output.arrival_time.append(choices[0].get("arrival_time", timestamp))
+                            arrival = choices[0].get("arrival_time")
+                            if arrival is not None:
+                                output.has_arrival_time = True
+                                output.arrival_time.append(arrival)
                         elif usage := data.get("usage", {}):
                             output.output_tokens = usage.get("completion_tokens", 0)
                             output.prompt_tokens = usage.get("prompt_tokens", 0)
@@ -458,6 +461,9 @@ async def async_request_eb_openai_chat_completions(
 
                         output.tool_calls.append({"id": tc["id"], "name": tc["name"], "arguments": args})
 
+                # 如果没有thinking内容，则response首token等于ttft
+                if not output.reasoning_content:
+                    output.res_ttft = output.ttft
                 # 新增metrics统计，计算首token过滤空包
                 output.metrics = metrics_summary(metrics_list, token_timestamps[1:])
 

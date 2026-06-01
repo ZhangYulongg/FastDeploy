@@ -343,7 +343,7 @@ async def async_request_eb_openai_chat_completions(
     if request_func_input.stream:
         payload["stream_options"] = {
             "include_usage": True,
-            # "continuous_usage_stats": True,
+            "continuous_usage_stats": True,
         }
     if request_func_input.json_data:
         json_data = request_func_input.json_data
@@ -422,6 +422,7 @@ async def async_request_eb_openai_chat_completions(
     res_ttft = 0.0
     st = time.perf_counter()
     most_recent_timestamp = st
+    last_chunk_timestamp = st
     token_timestamps = []
     tool_call_buffer = {}
     try:
@@ -430,63 +431,76 @@ async def async_request_eb_openai_chat_completions(
             if response.status == 200:
                 # 默认流式模式
                 if request_func_input.stream:
+                    # Reader loop 保持极简：只记录收包时间和原始 chunk，避免解析/拼接影响 ITL。
+                    stream_chunks = []
                     async for chunk_bytes in response.content:
+                        timestamp = time.perf_counter()
+                        wall_timestamp = time.time()
                         chunk_bytes = chunk_bytes.strip()
                         if not chunk_bytes:
                             continue
+                        if chunk_bytes in (b"data: [DONE]", b"[DONE]"):
+                            break
+                        stream_chunks.append((chunk_bytes, timestamp, wall_timestamp))
 
+                    generated_text_parts = []
+                    reasoning_content_parts = []
+                    for chunk_bytes, timestamp, wall_timestamp in stream_chunks:
                         chunk = chunk_bytes.decode("utf-8").removeprefix("data: ")
-                        if chunk != "[DONE]":
-                            # print("####chunk:", chunk, type(chunk))
-                            timestamp = time.perf_counter()
-                            data = json.loads(chunk)
+                        if chunk == "[DONE]":
+                            continue
+                        # print("####chunk:", chunk, type(chunk))
+                        data = json.loads(chunk)
 
-                            # 新增：捕获服务端流式 error
-                            if "error" in data:
-                                err = data["error"]
+                        # 新增：捕获服务端流式 error
+                        if "error" in data:
+                            err = data["error"]
 
-                                output.success = False
-                                output.error = err.get("message", str(err))
+                            output.success = False
+                            output.error = err.get("message", str(err))
 
-                                # 可选：保存更多信息
-                                output.error_type = err.get("type")
-                                output.error_code = err.get("code")
+                            # 可选：保存更多信息
+                            output.error_type = err.get("type")
+                            output.error_code = err.get("code")
 
-                                print("####server error:", json.dumps(err, ensure_ascii=False))
+                            print("####server error:", json.dumps(err, ensure_ascii=False))
 
-                                break
-                            # print("####data:", json.dumps(data, indent=2, ensure_ascii=False))
+                            break
+                        # print("####data:", json.dumps(data, indent=2, ensure_ascii=False))
 
-                            if "metrics" in data:
-                                metrics_list.append(data["metrics"])
+                        if "metrics" in data:
+                            metrics_list.append(data["metrics"])
 
-                            if request_id == "None" and "id" in data:
-                                request_id = data["id"]
+                        if request_id == "None" and "id" in data:
+                            request_id = data["id"]
 
-                            if choices := data.get("choices"):
-                                content = choices[0]["delta"].get("content")
-                                reason_content = choices[0]["delta"].get("reasoning_content")
-                                tool_calls = choices[0]["delta"].get("tool_calls")
-                                completion_token_ids = choices[0]["delta"].get("completion_token_ids", [])
-                                if tool_calls:
-                                    for tc in tool_calls:
-                                        idx = tc.get("index", 0)
+                        if choices := data.get("choices"):
+                            content = choices[0]["delta"].get("content")
+                            reason_content = choices[0]["delta"].get("reasoning_content")
+                            tool_calls = choices[0]["delta"].get("tool_calls")
+                            completion_token_ids = choices[0]["delta"].get("completion_token_ids", [])
+                            has_token_chunk = bool(content or reason_content or tool_calls or completion_token_ids)
+                            if tool_calls:
+                                for tc in tool_calls:
+                                    idx = tc.get("index", 0)
 
-                                        if idx not in tool_call_buffer:
-                                            tool_call_buffer[idx] = {
-                                                "id": tc.get("id"),
-                                                "name": "",
-                                                "arguments": "",
-                                            }
+                                    if idx not in tool_call_buffer:
+                                        tool_call_buffer[idx] = {
+                                            "id": tc.get("id"),
+                                            "name": "",
+                                            "arguments": "",
+                                        }
 
-                                        func = tc.get("function", {})
+                                    func = tc.get("function", {})
 
-                                        if "name" in func:
-                                            tool_call_buffer[idx]["name"] = func["name"]
+                                    if "name" in func:
+                                        tool_call_buffer[idx]["name"] = func["name"]
 
-                                        if "arguments" in func:
-                                            tool_call_buffer[idx]["arguments"] += func["arguments"]
+                                    if "arguments" in func:
+                                        tool_call_buffer[idx]["arguments"] += func["arguments"]
 
+                            # 过滤 role / finish / usage 等空包，只用真正 token 包统计 TTFT/ITL。
+                            if has_token_chunk:
                                 # First token
                                 if ttft == 0.0:
                                     ttft = timestamp - st
@@ -495,7 +509,9 @@ async def async_request_eb_openai_chat_completions(
                                     usage = data.get("usage") or {}
 
                                     if usage.get("prompt_tokens_details"):
-                                        output.prompt_len = usage.get("prompt_tokens_details", {}).get("cached_tokens", 0)
+                                        output.prompt_len = usage.get("prompt_tokens_details", {}).get(
+                                            "cached_tokens", 0
+                                        )
                                     else:
                                         output.prompt_len = 0
 
@@ -503,36 +519,41 @@ async def async_request_eb_openai_chat_completions(
                                 else:
                                     output.itl.append(timestamp - most_recent_timestamp)
 
-                                # response首token
-                                if res_ttft == 0.0:
-                                    if content:
-                                        res_ttft = choices[0].get("arrival_time", timestamp)
-                                        output.res_ttft = res_ttft
-                                        usage = data.get("usage") or {}
-                                        output.reasoning_tokens = max(usage.get("completion_tokens", 0) - 1, 0)
+                                most_recent_timestamp = timestamp
+                                token_timestamps.append(wall_timestamp)
 
-                                output.generated_text += content or ""
-                                output.reasoning_content += reason_content or ""
-                                if completion_token_ids:
-                                    output.output_ids.extend(completion_token_ids)
-                                # print(f"####content:{data}")
-                                arrival = choices[0].get("arrival_time")
-                                if arrival is not None:
-                                    output.has_arrival_time = True
-                                    output.arrival_time.append(arrival)
-                            elif usage := data.get("usage", {}):
-                                output.output_tokens = usage.get("completion_tokens", 0)
-                                output.prompt_tokens = usage.get("prompt_tokens", 0)
-                                prompt_tokens_details = usage.get("prompt_tokens_details") or {}
-                                if output.prompt_len == 0:
-                                    output.prompt_len = prompt_tokens_details.get("cached_tokens", 0)
+                            # response首token
+                            if res_ttft == 0.0:
+                                if content:
+                                    res_ttft = choices[0].get("arrival_time", timestamp)
+                                    output.res_ttft = res_ttft
+                                    usage = data.get("usage") or {}
+                                    output.reasoning_tokens = max(usage.get("completion_tokens", 0) - 1, 0)
 
-                            most_recent_timestamp = timestamp
-                            token_timestamps.append(time.time())
+                            if content:
+                                generated_text_parts.append(content)
+                            if reason_content:
+                                reasoning_content_parts.append(reason_content)
+                            if completion_token_ids:
+                                output.output_ids.extend(completion_token_ids)
+                            # print(f"####content:{data}")
+                            arrival = choices[0].get("arrival_time")
+                            if arrival is not None and has_token_chunk:
+                                output.has_arrival_time = True
+                                output.arrival_time.append(arrival)
+                        elif usage := data.get("usage", {}):
+                            output.output_tokens = usage.get("completion_tokens", 0)
+                            output.prompt_tokens = usage.get("prompt_tokens", 0)
+                            prompt_tokens_details = usage.get("prompt_tokens_details") or {}
+                            if output.prompt_len == 0:
+                                output.prompt_len = prompt_tokens_details.get("cached_tokens", 0)
 
-                    # output.generated_text = generated_text
-                    # 在流式结束时，记录最后一个 chunk 收到的时间戳
-                    output.end_timestamp = most_recent_timestamp
+                        last_chunk_timestamp = timestamp
+
+                    output.generated_text = "".join(generated_text_parts)
+                    output.reasoning_content = "".join(reasoning_content_parts)
+                    # 在流式结束时，记录最后一个非 DONE chunk 收到的时间戳
+                    output.end_timestamp = last_chunk_timestamp
                     # 截断case
                     usage = data.get("usage", {})
                     output.output_tokens = usage.get("completion_tokens", 0)

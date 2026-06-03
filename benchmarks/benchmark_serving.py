@@ -385,6 +385,8 @@ async def benchmark(
         raise ValueError(f"Unknown backend: {backend}")
 
     print("Starting initial single prompt test run...")
+    if not args.stream:
+        print("使用非流式请求")
     test_prompt, test_output_len, test_no, test_json_data = (
         input_requests[0].prompt,
         input_requests[0].expected_output_len,
@@ -418,6 +420,7 @@ async def benchmark(
         json_data=test_json_data,
         tokenizer_model=args.tokenizer_model,
         tokenizer_path=args.tokenizer_path,
+        stream=args.stream,
     )
 
     if not debug:
@@ -528,6 +531,7 @@ async def benchmark(
                 json_data=json_data,
                 tokenizer_model=args.tokenizer_model,
                 tokenizer_path=args.tokenizer_path,
+                stream=args.stream,
             )
             tasks.append(asyncio.create_task(limited_request_func(request_func_input=request_func_input, pbar=pbar)))
 
@@ -616,6 +620,7 @@ async def benchmark(
                     json_data=json_data,
                     tokenizer_model=args.tokenizer_model,
                     tokenizer_path=args.tokenizer_path,
+                    stream=args.stream,
                 )
 
                 tasks.append(asyncio.create_task(limited_request_func_per_ip(req_input, semaphore, pbar)))
@@ -1150,8 +1155,10 @@ def save_to_pytorch_benchmark_format(args: argparse.Namespace, results: dict[str
 def main(args: argparse.Namespace):
     """Main entry point"""
     print(args)
-    random.seed(args.seed)
-    np.random.seed(args.seed)
+    if args.seed is not None:
+        print(f"Using random seed: {args.seed}")
+        random.seed(args.seed)
+        np.random.seed(args.seed)
 
     backend = args.backend
     # 支持多轮对话方式请求，仅支持chat接口
@@ -1230,7 +1237,7 @@ def main(args: argparse.Namespace):
     # 超参由yaml传入
     if args.hyperparameter_path:
         with open(args.hyperparameter_path, "r") as f:
-            hyper_parameters = yaml.safe_load(f)
+            hyper_parameters = yaml.safe_load(f) or {}
     else:
         hyper_parameters = {}
 
@@ -1458,7 +1465,7 @@ if __name__ == "__main__":
         "bursty requests. A higher burstiness value (burstiness > 1) "
         "results in a more uniform arrival of requests.",
     )
-    parser.add_argument("--seed", type=int, default=0)
+    parser.add_argument("--seed", type=int, default=None)
     parser.add_argument(
         "--shuffle",
         action="store_true",
@@ -1474,6 +1481,13 @@ if __name__ == "__main__":
         action="store_true",
         help="按多轮对话方式请求",
     )
+    parser.add_argument(
+        "--no-stream",
+        action="store_false",
+        dest="stream",
+        help="关闭流式输出",
+    )
+    parser.set_defaults(stream=True)
     parser.add_argument(
         "--tokenizer-model",
         default="auto",

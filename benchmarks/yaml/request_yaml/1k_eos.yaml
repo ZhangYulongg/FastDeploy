@@ -1,0 +1,2 @@
+ignore_eos: true
+max_tokens: 1024

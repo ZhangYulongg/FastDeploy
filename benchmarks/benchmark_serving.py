@@ -297,15 +297,15 @@ def calculate_metrics(
         )
 
     # === Cleaned ITL aggregation ===
-    BURST_THRESHOLD_S   = 0.001   # 1 ms
-    PREEMPT_THRESHOLD_S = 0.5     # 500 ms
+    BURST_THRESHOLD_S = 0.001  # 1 ms
+    PREEMPT_THRESHOLD_S = 0.5  # 500 ms
     all_itls_flat: list[float] = []
     for o in outputs:
         if o.success:
             all_itls_flat.extend(o.itl)
     _arr = np.asarray(all_itls_flat, dtype=float) if all_itls_flat else np.empty(0)
-    n_itls_total   = int(_arr.size)
-    n_itls_burst   = int((_arr < BURST_THRESHOLD_S).sum())
+    n_itls_total = int(_arr.size)
+    n_itls_burst = int((_arr < BURST_THRESHOLD_S).sum())
     n_itls_preempt = int((_arr > PREEMPT_THRESHOLD_S).sum())
     _clean = _arr[(_arr >= BURST_THRESHOLD_S) & (_arr <= PREEMPT_THRESHOLD_S)]
     n_itls_clean = int(_clean.size)
@@ -436,6 +436,9 @@ async def benchmark(
     if len(ip_list) >= 1:
         api_url = f"http://{ip_list[0]}{args.endpoint}"
 
+    # warmup短输出：取128和hyper_parameters中max_tokens的最小值
+    warmup_output_len = min(128, hyper_parameters.get("max_tokens", 128))
+    warmup_hyper = {k: v for k, v in hyper_parameters.items() if k != "max_tokens"}
     test_input = RequestFuncInput(
         model=model_id,
         model_name=model_name,
@@ -443,9 +446,9 @@ async def benchmark(
         no=test_no,
         prompt_len=0,
         history_QA=test_history_QA,
-        hyper_parameters=hyper_parameters,
+        hyper_parameters=warmup_hyper,
         api_url=api_url,
-        output_len=test_output_len,
+        output_len=warmup_output_len,
         logprobs=logprobs,
         ignore_eos=ignore_eos,
         debug=debug,
@@ -931,15 +934,24 @@ async def benchmark(
             print("{:<40} {:<10.2f}".format(f"P{p_word} {metric_name}:", value))
             result[f"p{p_word}_{metric_attribute_name}"] = value
 
-    print("{s:{c}^{n}}".format(s='解码速度 (ITL全局聚合)', n=50, c='-'))
+    print("{s:{c}^{n}}".format(s="解码速度 (ITL全局聚合)", n=50, c="-"))
     _tot = max(metrics.n_itls_total, 1)
     print("{:<40} {:<10d}".format("Total ITLs:", metrics.n_itls_total))
-    print("{:<40} {:<10d} ({:.2f}%)".format(
-        "ITL < 1ms (burst):", metrics.n_itls_burst, 100 * metrics.n_itls_burst / _tot))
-    print("{:<40} {:<10d} ({:.2f}%)".format(
-        "ITL > 500ms (preempt):", metrics.n_itls_preempt, 100 * metrics.n_itls_preempt / _tot))
-    print("{:<40} {:<10d} ({:.2f}%)".format(
-        "ITL clean [1ms,500ms]:", metrics.n_itls_clean, 100 * metrics.n_itls_clean / _tot))
+    print(
+        "{:<40} {:<10d} ({:.2f}%)".format(
+            "ITL < 1ms (burst):", metrics.n_itls_burst, 100 * metrics.n_itls_burst / _tot
+        )
+    )
+    print(
+        "{:<40} {:<10d} ({:.2f}%)".format(
+            "ITL > 500ms (preempt):", metrics.n_itls_preempt, 100 * metrics.n_itls_preempt / _tot
+        )
+    )
+    print(
+        "{:<40} {:<10d} ({:.2f}%)".format(
+            "ITL clean [1ms,500ms]:", metrics.n_itls_clean, 100 * metrics.n_itls_clean / _tot
+        )
+    )
     print("{:<40} {:<10.2f}".format("Decode speed (clean, tok/s):", metrics.s_decode_clean))
     process_one_length("s_decode", "Decode", "解码速度(tok/s)")
     process_one_metric("ttft", "TTFT", "Time to First Token")

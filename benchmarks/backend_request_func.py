@@ -358,16 +358,14 @@ async def async_request_eb_openai_chat_completions(
     if request_func_input.response_format:
         payload["response_format"] = request_func_input.response_format
 
-    # Random-length input/output knob.
+    # 随机输入开关
     if request_func_input.random_flag:
         payload["max_tokens"] = request_func_input.output_len
         payload["min_tokens"] = request_func_input.output_len
-
-    # When the prompt is a list of token ids, route through prompt_token_ids
-    # regardless of random_flag.
-    if isinstance(request_func_input.prompt, list):
-        request_func_input.prompt_token_ids = request_func_input.prompt
-        request_func_input.prompt = ""
+        # 随机token_ids场景
+        if isinstance(request_func_input.prompt, list):
+            request_func_input.prompt_token_ids = request_func_input.prompt
+            request_func_input.prompt = ""
 
     # 支持传入prompt_token_ids
     if request_func_input.prompt_token_ids:
@@ -725,7 +723,9 @@ async def async_request_eb_openai_chat_completions_multi_turn(
     # yaml中或数据集中带tools才走工具调用逻辑
     json_data = request_func_input.json_data or {}
     hyper = request_func_input.hyper_parameters or {}
-    enable_tools = bool(json_data.get("tools") or hyper.get("tools"))
+    # enable_tools = bool(json_data.get("tools") or hyper.get("tools"))
+    # SWE数据集无工具可调用
+    enable_tools = False
 
     outputs = []
 
@@ -981,16 +981,20 @@ async def async_request_eb_openai_chat_completions_multi_turn(
 
                 else:
                     # 无tools
-                    history.append(
-                        {
-                            "role": "assistant",
-                            "content": output.generated_text,
-                        }
-                    )
+                    # history.append(
+                    #     {
+                    #         "role": "assistant",
+                    #         "content": output.generated_text,
+                    #     }
+                    # )
+                    # SWE数据集拒绝交互，直接用数据集里的模型返回
+                    pass
 
                 prompt_no += 1
             elif message["role"] == "assistant":
-                continue
+                # continue
+                # SWE数据集拒绝交互，直接用数据集里的模型返回
+                history.append(message)
             else:
                 history.append(message)
 

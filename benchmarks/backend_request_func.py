@@ -61,6 +61,8 @@ class RequestFuncInput:
     tokenizer_model: str = None
     tokenizer_path: str = None
     stream: bool = True
+    session_id: Optional[str] = None
+    turn_idx: Optional[int] = None
 
 
 @dataclass
@@ -410,6 +412,10 @@ async def async_request_eb_openai_chat_completions(
         "Content-Type": "application/json",
         "Authorization": f"Bearer {os.environ.get('OPENAI_API_KEY')}",
     }
+    if request_func_input.session_id is not None:
+        headers["X-SMG-Routing-Key"] = f"{request_func_input.session_id}"
+    if request_func_input.session_id is not None and request_func_input.turn_idx is not None:
+        headers["X-Request-Id"] = f"{request_func_input.session_id}:{request_func_input.turn_idx}"
 
     output = RequestFuncOutput()
     output.prompt_len = 0
@@ -782,6 +788,8 @@ async def async_request_eb_openai_chat_completions_multi_turn(
                 round_input = copy.deepcopy(request_func_input)
                 round_input.history_QA = history
                 round_input.no = f"{round_input.no}_{prompt_no}"
+                round_input.session_id = request_func_input.no
+                round_input.turn_idx = prompt_no
                 if use_token_ids:
                     if len(input_ids_all) == 0:
                         # 拼接token_ids模式，首轮token_ids

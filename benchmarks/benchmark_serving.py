@@ -22,6 +22,7 @@ import asyncio
 import gc
 import json
 import os
+import uuid
 import random
 import time
 import warnings
@@ -439,11 +440,12 @@ async def benchmark(
     # warmup短输出：取128和hyper_parameters中max_tokens的最小值
     warmup_output_len = min(128, hyper_parameters.get("max_tokens", 128))
     warmup_hyper = {k: v for k, v in hyper_parameters.items() if k != "max_tokens"}
+    warmup_request_id = f"warmup_{uuid.uuid4().hex[:8]}"
     test_input = RequestFuncInput(
         model=model_id,
         model_name=model_name,
         prompt=test_prompt,
-        no=test_no,
+        no=warmup_request_id,
         prompt_len=0,
         history_QA=test_history_QA,
         hyper_parameters=warmup_hyper,
@@ -460,6 +462,8 @@ async def benchmark(
         tokenizer_model=args.tokenizer_model,
         tokenizer_path=args.tokenizer_path,
         stream=args.stream,
+        session_id=f"warmup-{uuid.uuid4().hex}",
+        turn_idx=0,
     )
 
     if args.warmup:

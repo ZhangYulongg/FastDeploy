@@ -412,6 +412,7 @@ async def async_request_eb_openai_chat_completions(
         "Content-Type": "application/json",
         "Authorization": f"Bearer {os.environ.get('OPENAI_API_KEY')}",
     }
+
     if request_func_input.session_id is not None:
         headers["X-SMG-Routing-Key"] = f"{request_func_input.session_id}"
     if request_func_input.session_id is not None and request_func_input.turn_idx is not None:
@@ -841,16 +842,9 @@ async def async_request_eb_openai_chat_completions_multi_turn(
                 outputs.append(output)
 
                 if not output.success:
-                    session_end = time.perf_counter()
-                    metrics = SessionMetrics(
-                        session_no=request_func_input.no,
-                        session_e2e_time=session_end - session_start,
-                        pure_llm_time=llm_time,
-                        input_tokens=input_tokens,
-                        output_tokens=output_tokens,
-                        tool_calls=tool_call_count,
-                    )
-                    return outputs, metrics
+                    print(f"[SESSION CONTINUE] {round_input.no} request failed, skip this turn and continue session")
+                    prompt_no += 1
+                    continue
 
                 # llm_cost = s1 - s0
                 input_tokens += output.prompt_tokens
@@ -885,24 +879,13 @@ async def async_request_eb_openai_chat_completions_multi_turn(
 
                         # 工具调用失败
                         if tool_name and not is_tool_result:
-                            print(f"[SESSION FAIL] tool call failed: {tool_name}")
-
-                            output.success = False
-
-                            session_end = time.perf_counter()
-                            session_e2e_time = session_end - session_start
-                            tool_call_count += 1
-
-                            metrics = SessionMetrics(
-                                session_no=request_func_input.no,
-                                session_e2e_time=session_e2e_time,
-                                pure_llm_time=llm_time,
-                                input_tokens=input_tokens,
-                                output_tokens=output_tokens,
-                                tool_calls=tool_call_count,
+                            print(
+                                f"[SESSION CONTINUE] tool call failed: {tool_name}, break tool loop and continue session"
                             )
 
-                            return outputs, metrics
+                            output.success = False
+                            tool_call_count += 1
+                            break
 
                         if not is_tool_result:
                             history.append(
@@ -956,16 +939,10 @@ async def async_request_eb_openai_chat_completions_multi_turn(
                         outputs.append(output)
 
                         if not output.success:
-                            session_end = time.perf_counter()
-                            metrics = SessionMetrics(
-                                session_no=request_func_input.no,
-                                session_e2e_time=session_end - session_start,
-                                pure_llm_time=llm_time,
-                                input_tokens=input_tokens,
-                                output_tokens=output_tokens,
-                                tool_calls=tool_call_count,
+                            print(
+                                f"[SESSION CONTINUE] {round_input.no} tool-loop LLM request failed, break tool loop and continue session"
                             )
-                            return outputs, metrics
+                            break
 
                         input_tokens += output.prompt_tokens
                         output_tokens += output.output_tokens

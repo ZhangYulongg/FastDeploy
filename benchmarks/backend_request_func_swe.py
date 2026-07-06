@@ -25,6 +25,7 @@ import os
 import sys
 import time
 import traceback
+import uuid
 from dataclasses import dataclass, field
 from typing import Optional
 
@@ -771,6 +772,7 @@ async def async_request_eb_openai_chat_completions_multi_turn(
 
     # 只创建一次 session
     session_start = time.perf_counter()
+    session_uuid = uuid.uuid4().hex
     connector = aiohttp.TCPConnector(
         limit=0,
         limit_per_host=0,
@@ -789,7 +791,7 @@ async def async_request_eb_openai_chat_completions_multi_turn(
                 round_input = copy.deepcopy(request_func_input)
                 round_input.history_QA = history
                 round_input.no = f"{round_input.no}_{prompt_no}"
-                round_input.session_id = request_func_input.no
+                round_input.session_id = f"{session_uuid}:{request_func_input.no}"
                 round_input.turn_idx = prompt_no
                 if use_token_ids:
                     if len(input_ids_all) == 0:

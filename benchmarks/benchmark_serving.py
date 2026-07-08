@@ -267,10 +267,6 @@ def calculate_metrics(
                 else:
                     s_decodes.append(0)
             completed += 1
-        else:
-            actual_output_lens.append(0)
-            input_lens.append(0)
-            infer_input_lens.append(0)
 
     if goodput_config_dict:
         valid_metrics = []

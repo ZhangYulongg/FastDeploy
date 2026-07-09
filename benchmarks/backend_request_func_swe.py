@@ -17,7 +17,6 @@
 # This file is modified from https://github.com/vllm-project/vllm/blob/main/benchmarks/backend_request_func.py
 
 
-import asyncio
 import copy
 import io
 import json
@@ -318,7 +317,6 @@ async def async_request_eb_openai_chat_completions(
     request_func_input: RequestFuncInput,
     pbar: Optional[tqdm] = None,
     session: aiohttp.ClientSession | None = None,
-    stall_event: asyncio.Event | None = None,
 ) -> RequestFuncOutput:
     """Request an LLM using EB OpenAI"""
     api_url = request_func_input.api_url
@@ -455,8 +453,6 @@ async def async_request_eb_openai_chat_completions(
                             continue
                         if chunk_bytes in (b"data: [DONE]", b"[DONE]"):
                             break
-                        if stall_event is not None:
-                            stall_event.set()
                         stream_chunks.append((chunk_bytes, timestamp, wall_timestamp))
 
                     generated_text_parts = []
@@ -641,8 +637,6 @@ async def async_request_eb_openai_chat_completions(
                     output.latency = most_recent_timestamp - st
                 else:
                     # 非流式模式
-                    if stall_event is not None:
-                        stall_event.set()
                     data, request_id = await handle_non_stream_response(
                         response=response,
                         output=output,
@@ -785,21 +779,6 @@ async def async_request_eb_openai_chat_completions_multi_turn(
         keepalive_timeout=60,
     )
 
-    async def _stall_watchdog(req_no, stall_event, timeout_sec=300):
-        """监控请求是否 hang 住：如果 timeout_sec 内没有新 chunk 也没有结束，打印警告"""
-        while True:
-            stall_event.clear()
-            try:
-                await asyncio.wait_for(stall_event.wait(), timeout=timeout_sec)
-            except asyncio.TimeoutError:
-                print(
-                    f"[TIMEOUT WARNING] request_id={req_no} no new data for "
-                    f"{timeout_sec}s, request may be hanging",
-                    flush=True,
-                )
-                # 只警告一次后退出
-                break
-
     async with aiohttp.ClientSession(
         connector=connector,
         trust_env=True,
@@ -854,31 +833,27 @@ async def async_request_eb_openai_chat_completions_multi_turn(
                         round_input.prompt_token_ids = input_ids_all
                 # 复用 session
                 s0 = time.perf_counter()
-
-                _stall_evt = asyncio.Event()
-                _watchdog = asyncio.ensure_future(_stall_watchdog(round_input.no, _stall_evt))
                 output = await async_request_eb_openai_chat_completions(
                     round_input,
                     pbar=None,
                     session=session,
-                    stall_event=_stall_evt,
                 )
-                _watchdog.cancel()
-
                 s1 = time.perf_counter()
                 llm_time += s1 - s0
 
                 outputs.append(output)
 
                 if not output.success:
-                    if enable_tools:
-                        # 有工具调用时，请求失败直接中断整个session
-                        print(f"[SESSION STOP] {round_input.no} request failed with tools, stop session")
-                        break
-                    # SWE无工具调用时，跳过当前轮但继续session
-                    print(f"[SESSION WARN] {round_input.no} request failed, continue session")
-                    prompt_no += 1
-                    continue
+                    session_end = time.perf_counter()
+                    metrics = SessionMetrics(
+                        session_no=request_func_input.no,
+                        session_e2e_time=session_end - session_start,
+                        pure_llm_time=llm_time,
+                        input_tokens=input_tokens,
+                        output_tokens=output_tokens,
+                        tool_calls=tool_call_count,
+                    )
+                    return outputs, metrics
 
                 # llm_cost = s1 - s0
                 input_tokens += output.prompt_tokens
@@ -899,7 +874,6 @@ async def async_request_eb_openai_chat_completions_multi_turn(
                     max_prompt_len = json_data.get("max_prompt_len")
                     if not tool_url:
                         raise ValueError("tool_url is empty.")
-                    session_stopped = False
                     for _ in range(max_loop):
                         t0 = time.perf_counter()
                         tool_result, is_tool_result, tool_name, tool_id = await simple_tool_call(
@@ -912,14 +886,26 @@ async def async_request_eb_openai_chat_completions_multi_turn(
                         # print(f"#### tool_result: {tool_result}")
                         # print(f"#### is_tool_result: {is_tool_result}")
 
-                        # 工具调用失败，中断整个session
+                        # 工具调用失败
                         if tool_name and not is_tool_result:
-                            print(f"[SESSION STOP] tool call failed: {tool_name}, stop session")
+                            print(f"[SESSION FAIL] tool call failed: {tool_name}")
 
                             output.success = False
+
+                            session_end = time.perf_counter()
+                            session_e2e_time = session_end - session_start
                             tool_call_count += 1
-                            session_stopped = True
-                            break
+
+                            metrics = SessionMetrics(
+                                session_no=request_func_input.no,
+                                session_e2e_time=session_e2e_time,
+                                pure_llm_time=llm_time,
+                                input_tokens=input_tokens,
+                                output_tokens=output_tokens,
+                                tool_calls=tool_call_count,
+                            )
+
+                            return outputs, metrics
 
                         if not is_tool_result:
                             history.append(
@@ -962,24 +948,27 @@ async def async_request_eb_openai_chat_completions_multi_turn(
                         round_input.history_QA = history
 
                         s0 = time.perf_counter()
-                        _stall_evt = asyncio.Event()
-                        _watchdog = asyncio.ensure_future(_stall_watchdog(round_input.no, _stall_evt))
                         output = await async_request_eb_openai_chat_completions(
                             round_input,
                             pbar=None,
                             session=session,
-                            stall_event=_stall_evt,
                         )
-                        _watchdog.cancel()
                         s1 = time.perf_counter()
                         llm_time += s1 - s0
 
                         outputs.append(output)
 
                         if not output.success:
-                            print(f"[SESSION STOP] {round_input.no} tool loop request failed, stop session")
-                            session_stopped = True
-                            break
+                            session_end = time.perf_counter()
+                            metrics = SessionMetrics(
+                                session_no=request_func_input.no,
+                                session_e2e_time=session_end - session_start,
+                                pure_llm_time=llm_time,
+                                input_tokens=input_tokens,
+                                output_tokens=output_tokens,
+                                tool_calls=tool_call_count,
+                            )
+                            return outputs, metrics
 
                         input_tokens += output.prompt_tokens
                         output_tokens += output.output_tokens
@@ -1000,10 +989,6 @@ async def async_request_eb_openai_chat_completions_multi_turn(
                             return outputs, metrics
                     else:
                         print(f"Warning {prompt_no} exceed max_loop={max_loop}, force stop tool loop")
-
-                    if session_stopped:
-                        # 工具调用失败，中断整个session
-                        break
 
                 else:
                     # 无tools

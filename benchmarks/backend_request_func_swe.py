@@ -300,7 +300,7 @@ async def handle_non_stream_response(
     # arrival_time:
     output.arrival_time = []
 
-    has_text = output.generated_text.strip() or output.reasoning_content.strip()
+    has_text = bool(output.generated_text) or bool(output.reasoning_content)
 
     has_tool = bool(output.tool_calls)
 
@@ -621,7 +621,7 @@ async def async_request_eb_openai_chat_completions(
                     # 新增metrics统计，计算首token过滤空包
                     output.metrics = metrics_summary(metrics_list, token_timestamps[1:])
 
-                    has_text = output.generated_text.strip() or output.reasoning_content.strip()
+                    has_text = bool(output.generated_text) or bool(output.reasoning_content)
                     has_tool = getattr(output, "tool_calls", None)
 
                     # 如果前面已经有服务端错误，保留原错误

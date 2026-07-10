@@ -17,7 +17,6 @@
 # This file is modified from https://github.com/vllm-project/vllm/blob/main/benchmarks/backend_request_func.py
 
 
-import asyncio
 import copy
 import io
 import json
@@ -318,7 +317,6 @@ async def async_request_eb_openai_chat_completions(
     request_func_input: RequestFuncInput,
     pbar: Optional[tqdm] = None,
     session: aiohttp.ClientSession | None = None,
-    stall_event: asyncio.Event | None = None,
 ) -> RequestFuncOutput:
     """Request an LLM using EB OpenAI"""
     api_url = request_func_input.api_url
@@ -455,8 +453,6 @@ async def async_request_eb_openai_chat_completions(
                             continue
                         if chunk_bytes in (b"data: [DONE]", b"[DONE]"):
                             break
-                        if stall_event is not None:
-                            stall_event.set()
                         stream_chunks.append((chunk_bytes, timestamp, wall_timestamp))
 
                     generated_text_parts = []
@@ -641,8 +637,6 @@ async def async_request_eb_openai_chat_completions(
                     output.latency = most_recent_timestamp - st
                 else:
                     # 非流式模式
-                    if stall_event is not None:
-                        stall_event.set()
                     data, request_id = await handle_non_stream_response(
                         response=response,
                         output=output,
@@ -785,21 +779,6 @@ async def async_request_eb_openai_chat_completions_multi_turn(
         keepalive_timeout=60,
     )
 
-    async def _stall_watchdog(req_no, stall_event, timeout_sec=300):
-        """监控请求是否 hang 住：如果 timeout_sec 内没有新 chunk 也没有结束，打印警告"""
-        while True:
-            stall_event.clear()
-            try:
-                await asyncio.wait_for(stall_event.wait(), timeout=timeout_sec)
-            except asyncio.TimeoutError:
-                print(
-                    f"[TIMEOUT WARNING] request_id={req_no} no new data for "
-                    f"{timeout_sec}s, request may be hanging",
-                    flush=True,
-                )
-                # 只警告一次后退出
-                break
-
     async with aiohttp.ClientSession(
         connector=connector,
         trust_env=True,
@@ -854,16 +833,11 @@ async def async_request_eb_openai_chat_completions_multi_turn(
                         round_input.prompt_token_ids = input_ids_all
                 # 复用 session
                 s0 = time.perf_counter()
-
-                _stall_evt = asyncio.Event()
-                _watchdog = asyncio.ensure_future(_stall_watchdog(round_input.no, _stall_evt))
                 output = await async_request_eb_openai_chat_completions(
                     round_input,
                     pbar=None,
                     session=session,
-                    stall_event=_stall_evt,
                 )
-                _watchdog.cancel()
                 s1 = time.perf_counter()
                 llm_time += s1 - s0
 
@@ -974,15 +948,11 @@ async def async_request_eb_openai_chat_completions_multi_turn(
                         round_input.history_QA = history
 
                         s0 = time.perf_counter()
-                        _stall_evt = asyncio.Event()
-                        _watchdog = asyncio.ensure_future(_stall_watchdog(round_input.no, _stall_evt))
                         output = await async_request_eb_openai_chat_completions(
                             round_input,
                             pbar=None,
                             session=session,
-                            stall_event=_stall_evt,
                         )
-                        _watchdog.cancel()
                         s1 = time.perf_counter()
                         llm_time += s1 - s0
 

@@ -32,7 +32,7 @@ from typing import Optional
 import aiohttp
 from tqdm.asyncio import tqdm
 
-AIOHTTP_TIMEOUT = aiohttp.ClientTimeout(total=6 * 60 * 60)
+AIOHTTP_TIMEOUT = aiohttp.ClientTimeout(total=int(os.environ.get("AIOHTTP_TIMEOUT", 6 * 60 * 60)))
 
 
 @dataclass

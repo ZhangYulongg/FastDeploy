@@ -669,7 +669,7 @@ async def async_request_eb_openai_chat_completions(
         print(
             "####error response:",
             output,
-            "####payload:",
+            "\n####payload:",
             payload,
         )
     if pbar:

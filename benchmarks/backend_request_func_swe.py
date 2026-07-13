@@ -666,6 +666,12 @@ async def async_request_eb_openai_chat_completions(
     if not output.success or output.output_tokens == 0:
         with open("error_output.txt", "a") as f:
             f.write(str(output) + "\n")
+        print(
+            "####error response:",
+            error_text,
+            "####payload:",
+            payload,
+        )
     if pbar:
         pbar.update(1)
     if request_func_input.debug:

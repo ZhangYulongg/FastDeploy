@@ -668,7 +668,7 @@ async def async_request_eb_openai_chat_completions(
             f.write(str(output) + "\n")
         print(
             "####error response:",
-            error_text,
+            output,
             "####payload:",
             payload,
         )

@@ -668,9 +668,7 @@ async def async_request_eb_openai_chat_completions(
             f.write(str(output) + "\n")
         print(
             "####error response:",
-            output,
-            "\n####payload:",
-            payload,
+            output
         )
     if pbar:
         pbar.update(1)

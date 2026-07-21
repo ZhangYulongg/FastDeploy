@@ -25,20 +25,21 @@ import os
 import sys
 import time
 import traceback
+import uuid
 from dataclasses import dataclass, field
 from typing import Optional
 
 import aiohttp
 from tqdm.asyncio import tqdm
 
-AIOHTTP_TIMEOUT = aiohttp.ClientTimeout(total=6 * 60 * 60)
+AIOHTTP_TIMEOUT = aiohttp.ClientTimeout(total=int(os.environ.get("AIOHTTP_TIMEOUT", 6 * 60 * 60)))
 
 
 @dataclass
 class RequestFuncInput:
     """Input for requesting LLMs via API"""
 
-    no: str
+    no: int
     prompt: str
     history_QA: Optional[dict]
     hyper_parameters: dict
@@ -299,7 +300,7 @@ async def handle_non_stream_response(
     # arrival_time:
     output.arrival_time = []
 
-    has_text = output.generated_text.strip() or output.reasoning_content.strip()
+    has_text = bool(output.generated_text) or bool(output.reasoning_content)
 
     has_tool = bool(output.tool_calls)
 
@@ -414,6 +415,11 @@ async def async_request_eb_openai_chat_completions(
         "Content-Type": "application/json",
         "Authorization": f"Bearer {os.environ.get('OPENAI_API_KEY')}",
     }
+
+    if request_func_input.session_id is not None:
+        headers["X-SMG-Routing-Key"] = f"{request_func_input.session_id}"
+    if request_func_input.session_id is not None and request_func_input.turn_idx is not None:
+        headers["X-Request-Id"] = f"{request_func_input.session_id}:{request_func_input.turn_idx}"
 
     output = RequestFuncOutput()
     output.prompt_len = 0
@@ -617,7 +623,7 @@ async def async_request_eb_openai_chat_completions(
                     # 新增metrics统计，计算首token过滤空包
                     output.metrics = metrics_summary(metrics_list, token_timestamps[1:])
 
-                    has_text = output.generated_text.strip() or output.reasoning_content.strip()
+                    has_text = bool(output.generated_text) or bool(output.reasoning_content)
                     has_tool = getattr(output, "tool_calls", None)
 
                     # 如果前面已经有服务端错误，保留原错误
@@ -662,6 +668,7 @@ async def async_request_eb_openai_chat_completions(
     if not output.success or output.output_tokens == 0:
         with open("error_output.txt", "a") as f:
             f.write(str(output) + "\n")
+        print("####error response:", output)
     if pbar:
         pbar.update(1)
     if request_func_input.debug:
@@ -766,6 +773,7 @@ async def async_request_eb_openai_chat_completions_multi_turn(
 
     # 只创建一次 session
     session_start = time.perf_counter()
+    session_uuid = uuid.uuid4().hex
     connector = aiohttp.TCPConnector(
         limit=0,
         limit_per_host=0,
@@ -784,6 +792,8 @@ async def async_request_eb_openai_chat_completions_multi_turn(
                 round_input = copy.deepcopy(request_func_input)
                 round_input.history_QA = history
                 round_input.no = f"{round_input.no}_{prompt_no}"
+                round_input.session_id = f"{session_uuid}:{request_func_input.no}"
+                round_input.turn_idx = prompt_no
                 if use_token_ids:
                     if len(input_ids_all) == 0:
                         # 拼接token_ids模式，首轮token_ids

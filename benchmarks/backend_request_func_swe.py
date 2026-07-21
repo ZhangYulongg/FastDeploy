@@ -731,12 +731,10 @@ async def async_request_eb_openai_chat_completions_multi_turn(
     request_func_input: RequestFuncInput,
     pbar: Optional[tqdm] = None,
 ):
-    # yaml中或数据集中带tools才走工具调用逻辑
+    # 只有显式指定 enable_tools=True 时才走工具调用逻辑，否则走SWE模式（直接用数据集拼接多轮）
     json_data = request_func_input.json_data or {}
     hyper = request_func_input.hyper_parameters or {}
-    # enable_tools = bool(json_data.get("tools") or hyper.get("tools"))
-    # SWE数据集无工具可调用
-    enable_tools = False
+    enable_tools = bool(json_data.get("enable_tools") or hyper.get("enable_tools"))
 
     outputs = []
 
@@ -994,21 +992,17 @@ async def async_request_eb_openai_chat_completions_multi_turn(
                         print(f"Warning {prompt_no} exceed max_loop={max_loop}, force stop tool loop")
 
                 else:
-                    # 无tools
-                    # history.append(
-                    #     {
-                    #         "role": "assistant",
-                    #         "content": output.generated_text,
-                    #     }
-                    # )
-                    # SWE数据集拒绝交互，直接用数据集里的模型返回
+                    # 无tools（SWE模式）：不追加模型实际返回，直接用数据集里的assistant回复拼接多轮
                     pass
 
                 prompt_no += 1
             elif message["role"] == "assistant":
-                # continue
-                # SWE数据集拒绝交互，直接用数据集里的模型返回
-                history.append(message)
+                if enable_tools:
+                    # 工具调用模式：跳过数据集里的assistant消息，使用模型实际返回
+                    continue
+                else:
+                    # SWE模式：直接用数据集里的assistant回复拼接多轮
+                    history.append(message)
             else:
                 history.append(message)
 

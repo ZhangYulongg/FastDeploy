@@ -632,11 +632,6 @@ async def async_request_eb_openai_chat_completions(
                     # 如果前面已经有服务端错误，保留原错误
                     if output.error:
                         output.success = False
-                    # 兼容思考内容超长截断的情况，此时回复内容为空
-                    elif not has_text and not has_tool:
-                        output.success = False
-                        output.reasoning_tokens = output.output_tokens
-                        output.error = "No generated text found!"
                     else:
                         output.success = True
                     output.latency = most_recent_timestamp - st
